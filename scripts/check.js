@@ -1027,6 +1027,20 @@ if (!sourceFiles.codexRunner.content.includes("codexSessionsRoot")) {
   failed = true;
   console.error("src/lib/codexRunner.js: local Codex session scanning must use the CODEX_HOME/.codex sessions root");
 }
+if (
+  !sourceFiles.settings.content.includes("codexModel: \"\"")
+  || !sourceFiles.settings.content.includes("function normalizeCodexModel")
+  || !sourceFiles.rendererIndex.content.includes("id=\"codexModel\"")
+  || !sourceFiles.rendererIndex.content.includes("gpt-5.6-sol")
+  || !sourceFiles.rendererIndex.content.includes("gpt-5.3-codex")
+  || !sourceFiles.rendererApp.content.includes("codexModel: normalizeCodexModel")
+  || !sourceFiles.main.content.includes("const codexModel = normalizeCodexModel")
+  || !sourceFiles.main.content.includes("codexModel,")
+  || !sourceFiles.codexRunner.content.includes("...(codexModel ? [\"--model\", codexModel] : [])")
+) {
+  failed = true;
+  console.error("Codex model selection must be saved from the UI and passed to codex exec with --model");
+}
 if (!sourceFiles.codexRunner.content.includes("\"--ephemeral\"") || !sourceFiles.codexRunner.content.includes("\"--ignore-rules\"")) {
   failed = true;
   console.error("src/lib/codexRunner.js: startup usage snapshot should be ephemeral and ignore project rules");

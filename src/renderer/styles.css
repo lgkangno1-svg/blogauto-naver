@@ -184,11 +184,11 @@ h2 {
 
 .agent-model-toolbar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(92px, 118px));
+  grid-template-columns: repeat(5, minmax(92px, 124px));
   gap: 8px;
   align-items: end;
-  flex: 1 1 460px;
-  max-width: 560px;
+  flex: 1 1 620px;
+  max-width: 680px;
   min-width: 0;
 }
 

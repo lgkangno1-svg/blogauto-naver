@@ -5,6 +5,16 @@ const LEGACY_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?where=web
 const DEFAULT_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query={query}";
 const DEFAULT_IMAGE_ASPECT_RATIO = "16:9";
 const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"]);
+const CODEX_MODEL_IDS = new Set([
+  "",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex"
+]);
 
 const DEFAULT_SETTINGS = {
   naverId: "",
@@ -14,6 +24,7 @@ const DEFAULT_SETTINGS = {
   keyword: "",
   category: "",
   codexCmdPath: "codex.cmd",
+  codexModel: "",
   primarySearchProvider: "naver",
   fallbackSearchProvider: "google",
   naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
@@ -66,7 +77,13 @@ function normalizeSettings(settings) {
   normalized.imageAspectRatio = normalizeImageAspectRatio(normalized.imageAspectRatio);
   normalized.titleImageAspectRatio = normalizeImageAspectRatio(normalized.titleImageAspectRatio || normalized.imageAspectRatio);
   normalized.bodyImageAspectRatio = normalizeImageAspectRatio(normalized.bodyImageAspectRatio || normalized.imageAspectRatio);
+  normalized.codexModel = normalizeCodexModel(normalized.codexModel);
   return normalized;
+}
+
+function normalizeCodexModel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CODEX_MODEL_IDS.has(normalized) ? normalized : "";
 }
 
 function normalizeImageAspectRatio(value) {
@@ -115,6 +132,7 @@ module.exports = {
   DEFAULT_SETTINGS,
   DEFAULT_NAVER_SEARCH_URL,
   DEFAULT_IMAGE_ASPECT_RATIO,
+  normalizeCodexModel,
   ensureSettingsFile,
   normalizeImageAspectRatio,
   readSettings,

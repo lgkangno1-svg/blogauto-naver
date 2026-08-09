@@ -31,6 +31,16 @@ const DEFAULT_AGENT_MODELS = {
   writer: "high",
   image: "medium"
 };
+const CODEX_MODEL_IDS = new Set([
+  "",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex"
+]);
 const AGENT_MODEL_SELECTORS = {
   main: "#mainAgentModel",
   research: "#researchAgentModel",
@@ -46,6 +56,11 @@ const IMAGE_ASPECT_RATIOS = new Set([DEFAULT_IMAGE_ASPECT_RATIO, "9:16", "1:1"])
 function normalizeImageAspectRatio(value) {
   const normalized = String(value || "").trim();
   return IMAGE_ASPECT_RATIOS.has(normalized) ? normalized : DEFAULT_IMAGE_ASPECT_RATIO;
+}
+
+function normalizeCodexModel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CODEX_MODEL_IDS.has(normalized) ? normalized : "";
 }
 
 function normalizeSearchProvider(value, fallback = "naver") {
@@ -1127,6 +1142,7 @@ function collectForm(target = {}) {
     searchChannel: normalizeSearchChannel(category?.searchChannel),
     trustBlogAsSource: category?.trustBlogAsSource === true,
     codexCmdPath: "codex.cmd",
+    codexModel: normalizeCodexModel($("#codexModel")?.value),
     primarySearchProvider: searchProviders.primarySearchProvider,
     fallbackSearchProvider: searchProviders.fallbackSearchProvider,
     naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
@@ -1173,6 +1189,7 @@ function applySettings(settings) {
   $("#titleImageAspectRatio").value = normalizeImageAspectRatio(settings.titleImageAspectRatio || settings.imageAspectRatio);
   $("#bodyImageAspectRatio").value = normalizeImageAspectRatio(settings.bodyImageAspectRatio || settings.imageAspectRatio);
   $("#breakSentencesInBody").checked = settings.breakSentencesInBody !== false;
+  if ($("#codexModel")) $("#codexModel").value = normalizeCodexModel(settings.codexModel);
   applyAgentModels(settings.agentModels);
   if (settings.publishPrivate === false) $("#publishVisibility").value = "public";
   updateModeControls();
@@ -1207,6 +1224,7 @@ async function saveSettingsNow() {
     bodyImageAspectRatio: form.bodyImageAspectRatio,
     maxBodyImages: form.maxBodyImages,
     breakSentencesInBody: form.breakSentencesInBody,
+    codexModel: form.codexModel,
     agentModels: form.agentModels
   });
   await saveAccountStoreNow();
@@ -1914,7 +1932,7 @@ async function boot() {
       addLog({ level: "error", message: error.message, at: new Date().toISOString() });
     });
   });
-  for (const selector of Object.values(AGENT_MODEL_SELECTORS)) {
+  for (const selector of ["#codexModel", ...Object.values(AGENT_MODEL_SELECTORS)]) {
     const control = $(selector);
     if (!control) continue;
     control.addEventListener("change", () => {

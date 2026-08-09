@@ -50,6 +50,7 @@ const path = require("node:path");
       ["topic mode", "#topicMode"],
       ["publish visibility", "#publishVisibility"],
       ["publish schedule", "#publishScheduleMode"],
+      ["codex model", "#codexModel"],
       ["main log", "#mainLogStream"],
       ["research log", "#researchLogStream"],
       ["writer log", "#writerLogStream"],

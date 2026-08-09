@@ -11,7 +11,7 @@ const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunn
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession, verifyOpenNaverSession } = require("./lib/naverPublisher");
 const { publishToTistory, checkTistorySession } = require("./lib/tistoryPublisher");
-const { ensureSettingsFile, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
+const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
 const {
   ensureAccountStoreFile,
   readAccountStore,
@@ -1026,6 +1026,7 @@ async function startJob(form) {
   const blogId = String(form.blogId || account.blogId || naverId).trim();
   const naverPassword = String(form.naverPassword || account.naverPassword || "");
   const codexCmdPath = String(form.codexCmdPath || "codex.cmd").trim();
+  const codexModel = normalizeCodexModel(form.codexModel || settings.codexModel);
   const publishVisibility = String(form.publishVisibility || (form.publishPrivate === false ? "public" : "private"));
   const publishPrivate = publishVisibility !== "public";
   const publishScheduleMode = String(form.publishScheduleMode || "now");
@@ -1158,6 +1159,7 @@ async function startJob(form) {
     keyword,
     category,
     codexCmdPath,
+    codexModel,
     primarySearchProvider: form.primarySearchProvider || "naver",
     fallbackSearchProvider: form.fallbackSearchProvider || "google",
     naverSearchUrl: form.naverSearchUrl || "",
@@ -1353,12 +1355,13 @@ async function startJob(form) {
     const usesImages = includeTitleImage || maxBodyImages > 0;
     const generationSubject = topic || `${category} ${keyword}`.trim();
     const modelSnapshot = {
+      codexModel: codexModel || "Codex 기본값",
       main: agentModels.main || "high",
       research: agentModels.research || "high",
       writer: agentModels.writer || "high",
       image: agentModels.image || "medium"
     };
-    safeLog(jobId, `Agent 모델 설정: Main ${modelSnapshot.main}, Research/Title ${modelSnapshot.research}, Writer ${modelSnapshot.writer}, Image Worker ${modelSnapshot.image}`);
+    safeLog(jobId, `Agent 모델 설정: Codex ${modelSnapshot.codexModel}, Main ${modelSnapshot.main}, Research/Title ${modelSnapshot.research}, Writer ${modelSnapshot.writer}, Image Worker ${modelSnapshot.image}`);
     safeLog(jobId, `Codex ${usesImages ? "본문/이미지 프롬프트" : "본문"} 생성 시작: ${generationSubject}`);
     const generationStartedAt = Date.now();
     let generationPhase = "준비 중";
@@ -1373,6 +1376,7 @@ async function startJob(form) {
         codexCmdPath,
         runtimeRoot,
         jobDir,
+        codexModel,
         topic,
         keyword,
         category,
