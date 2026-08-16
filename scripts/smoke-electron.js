@@ -4,13 +4,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 (async () => {
-  const userDataDir = path.resolve(__dirname, "..", "runtime", ".smoke-electron-profile");
-  const accountStorePath = path.resolve(__dirname, "..", "runtime", "account-categories.json");
-  const smokeAssetDir = path.resolve(__dirname, "..", "runtime", "account-assets", "acct_smoke_delete");
+  const smokeRuntimeRoot = path.resolve(__dirname, "..", "runtime", ".smoke-electron-runtime");
+  const userDataDir = path.join(smokeRuntimeRoot, "browser-profile");
+  const smokeAssetDir = path.join(smokeRuntimeRoot, "account-assets", "acct_smoke_delete");
   const smokeSampleImagePath = path.join(smokeAssetDir, "sample.png");
-  const accountStoreBackup = fs.existsSync(accountStorePath)
-    ? fs.readFileSync(accountStorePath, "utf8")
-    : null;
+  fs.rmSync(smokeRuntimeRoot, { recursive: true, force: true });
+  fs.mkdirSync(smokeRuntimeRoot, { recursive: true });
   fs.mkdirSync(userDataDir, { recursive: true });
   console.log("Launching Electron...");
   const app = await electron.launch({
@@ -18,7 +17,8 @@ const path = require("node:path");
     args: ["--disable-gpu", "--disable-software-rasterizer", `--user-data-dir=${userDataDir}`, "."],
     env: {
       ...process.env,
-      BLOGAUTO_SKIP_CODEX_USAGE_REFRESH: "1"
+      BLOGAUTO_SKIP_CODEX_USAGE_REFRESH: "1",
+      BLOGAUTO_RUNTIME_ROOT: smokeRuntimeRoot
     }
   });
   try {
@@ -290,12 +290,7 @@ const path = require("node:path");
 
   } finally {
     await app.close();
-    if (accountStoreBackup === null) {
-      fs.rmSync(accountStorePath, { force: true });
-    } else {
-      fs.writeFileSync(accountStorePath, accountStoreBackup, "utf8");
-    }
-    fs.rmSync(smokeAssetDir, { recursive: true, force: true });
+    fs.rmSync(smokeRuntimeRoot, { recursive: true, force: true });
   }
 })().catch((error) => {
   console.error(error);

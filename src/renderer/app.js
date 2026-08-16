@@ -100,10 +100,20 @@ function makeId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function ensureSelectedAccount() {
+  const accounts = state.accountStore.accounts || [];
+  if (!accounts.length) {
+    state.accountStore.selectedAccountId = "";
+    return null;
+  }
+  const selected = accounts.find((account) => account.id === state.accountStore.selectedAccountId);
+  if (selected) return selected;
+  state.accountStore.selectedAccountId = accounts[0].id;
+  return accounts[0];
+}
+
 function selectedAccount() {
-  return state.accountStore.accounts.find((account) => account.id === state.accountStore.selectedAccountId)
-    || state.accountStore.accounts[0]
-    || null;
+  return ensureSelectedAccount();
 }
 
 function setRunState(status, detail = "") {
@@ -692,6 +702,7 @@ function renderAccounts() {
   const list = $("#accountList");
   const manager = $("#accountManager");
   const toggle = $("#toggleAccountManagerButton");
+  ensureSelectedAccount();
   if (manager && toggle) {
     manager.classList.toggle("collapsed", !state.accountManagerOpen);
     toggle.textContent = state.accountManagerOpen ? "접기" : "펼치기";
@@ -782,13 +793,14 @@ function renderAccounts() {
         return;
       }
       state.accountStore.accounts = state.accountStore.accounts.filter((item) => item.id !== account.id);
-      if (state.accountStore.selectedAccountId === account.id) {
-        state.accountStore.selectedAccountId = state.accountStore.accounts[0]?.id || "";
-        const nextAccount = selectedAccount();
-        $("#accountLabel").value = nextAccount?.label || "";
-        $("#naverId").value = nextAccount?.naverId || "";
-        $("#blogId").value = nextAccount?.blogId || "";
-        $("#naverPassword").value = nextAccount?.naverPassword || "";
+      const nextAccount = ensureSelectedAccount();
+      if (nextAccount) {
+        fillAccountForm(nextAccount);
+        clearCategoryForm();
+        state.categoryManagerOpen = true;
+      } else {
+        clearAccountForm();
+        clearCategoryForm();
       }
       await saveAccountStoreNow();
       addLog({
@@ -1730,7 +1742,10 @@ async function boot() {
     };
     state.accountStore.accounts.push(account);
     state.accountStore.selectedAccountId = account.id;
+    state.categoryManagerOpen = true;
+    clearCategoryForm();
     await saveAccountStoreNow();
+    $("#categoryName")?.focus();
   });
 
   $("#updateAccountButton").addEventListener("click", async () => {

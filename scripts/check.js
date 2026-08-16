@@ -298,6 +298,20 @@ assertCondition(
   "src/lib/accountStore.js: category search channel, providers, and blog trust settings must be normalized"
 );
 assertCondition(
+  sourceFiles.accountStore.content.includes("const hasExplicitAccounts = Array.isArray(rawStore?.accounts)")
+    && sourceFiles.accountStore.content.includes("!hasExplicitAccounts && options.allowSettingsMigration !== false")
+    && sourceFiles.accountStore.content.includes("normalizeStore({}, settingsForMigration)")
+    && sourceFiles.accountStore.content.includes("allowSettingsMigration: false"),
+  "src/lib/accountStore.js: explicit empty account lists must not be repopulated from legacy settings on save"
+);
+assertCondition(
+  sourceFiles.rendererApp.content.includes("function ensureSelectedAccount()")
+    && sourceFiles.rendererApp.content.includes("state.accountStore.selectedAccountId = accounts[0].id")
+    && sourceFiles.rendererApp.content.includes("state.categoryManagerOpen = true")
+    && sourceFiles.rendererApp.content.includes("$(\"#categoryName\")?.focus()"),
+  "src/renderer/app.js: account add/delete must leave a valid selected account and open category input when possible"
+);
+assertCondition(
   sourceFiles.rendererIndex.content.includes("categorySearchChannel")
     && sourceFiles.rendererIndex.content.includes("value=\"news\"")
     && sourceFiles.rendererIndex.content.includes("categoryPrimarySearchProvider")

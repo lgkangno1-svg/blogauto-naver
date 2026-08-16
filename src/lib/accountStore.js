@@ -105,10 +105,11 @@ function migrateFromSettings(settings) {
   });
 }
 
-function normalizeStore(rawStore, settingsForMigration) {
-  const rawAccounts = Array.isArray(rawStore?.accounts) ? rawStore.accounts : [];
+function normalizeStore(rawStore, settingsForMigration, options = {}) {
+  const hasExplicitAccounts = Array.isArray(rawStore?.accounts);
+  const rawAccounts = hasExplicitAccounts ? rawStore.accounts : [];
   let accounts = rawAccounts.map(normalizeAccount);
-  if (!accounts.length) {
+  if (!accounts.length && !hasExplicitAccounts && options.allowSettingsMigration !== false) {
     const migrated = migrateFromSettings(settingsForMigration);
     if (migrated) accounts = [migrated];
   }
@@ -127,7 +128,7 @@ function ensureAccountStoreFile(runtimeRoot, settingsForMigration = {}) {
   fs.mkdirSync(runtimeRoot, { recursive: true });
   const storePath = getAccountStorePath(runtimeRoot);
   if (!fs.existsSync(storePath)) {
-    const initial = normalizeStore(DEFAULT_ACCOUNT_STORE, settingsForMigration);
+    const initial = normalizeStore({}, settingsForMigration);
     fs.writeFileSync(storePath, `${JSON.stringify(initial, null, 2)}\n`, "utf8");
   }
 }
@@ -139,13 +140,15 @@ function readAccountStore(runtimeRoot, settingsForMigration = {}) {
     const raw = fs.readFileSync(storePath, "utf8").replace(/^\uFEFF/, "");
     return normalizeStore(JSON.parse(raw), settingsForMigration);
   } catch {
-    return normalizeStore(DEFAULT_ACCOUNT_STORE, settingsForMigration);
+    return normalizeStore({}, settingsForMigration);
   }
 }
 
 function writeAccountStore(runtimeRoot, nextStore, settingsForMigration = {}) {
   ensureAccountStoreFile(runtimeRoot, settingsForMigration);
-  const normalized = normalizeStore(nextStore || DEFAULT_ACCOUNT_STORE, settingsForMigration);
+  const normalized = normalizeStore(nextStore || DEFAULT_ACCOUNT_STORE, settingsForMigration, {
+    allowSettingsMigration: false
+  });
   fs.writeFileSync(getAccountStorePath(runtimeRoot), `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
   return normalized;
 }
