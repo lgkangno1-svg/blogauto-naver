@@ -181,6 +181,10 @@ const sourceFiles = {
   search: {
     relative: "src/lib/search.js",
     content: fs.readFileSync(path.join(root, "src", "lib", "search.js"), "utf8")
+  },
+  smokeElectron: {
+    relative: "scripts/smoke-electron.js",
+    content: fs.readFileSync(path.join(root, "scripts", "smoke-electron.js"), "utf8")
   }
 };
 
@@ -1740,6 +1744,23 @@ if (!sourceFiles.rendererApp.content.includes("function clearCategoryForm")) {
 if (!sourceFiles.rendererApp.content.includes("const editingId = state.editingCategoryId")) {
   failed = true;
   console.error("src/renderer/app.js: category save must update by edit id instead of only by name");
+}
+if (
+  !sourceFiles.rendererApp.content.includes("function findCategoryById")
+  || !sourceFiles.rendererApp.content.includes("const currentCategory = findCategoryById(selectedAccount(), state.editingCategoryId) || category")
+  || !sourceFiles.rendererApp.content.includes("const editingCategory = findCategoryById(selectedAccount(), state.editingCategoryId)")
+  || !sourceFiles.rendererApp.content.includes("fillCategoryForm(editingCategory)")
+) {
+  failed = true;
+  console.error("src/renderer/app.js: category edit must reload the current full category object before filling detail fields");
+}
+if (
+  !sourceFiles.smokeElectron?.content?.includes("smoke excluded topic")
+  || !sourceFiles.smokeElectron?.content?.includes("categoryEditSnapshot")
+  || !sourceFiles.smokeElectron?.content?.includes("Category edit field")
+) {
+  failed = true;
+  console.error("scripts/smoke-electron.js: smoke test must verify category edit detail fields");
 }
 const renderCategoriesBlock = extractFunctionBlock(sourceFiles.rendererApp, "function renderCategories", "renderCategories function");
 if (renderCategoriesBlock && renderCategoriesBlock.content.includes("category.publishPurpose")) {

@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const LEGACY_NAVER_SEARCH_URL = "https://search.naver.com/search.naver?where=web&query={query}";
@@ -81,6 +82,47 @@ function normalizeSettings(settings) {
   return normalized;
 }
 
+function isDefaultCodexCmdPath(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return !normalized || normalized === "codex" || normalized === "codex.cmd" || normalized === "codex.exe";
+}
+
+function findDesktopCodexExecutable() {
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  const codexBinRoot = path.join(localAppData, "OpenAI", "Codex", "bin");
+  if (!fs.existsSync(codexBinRoot)) return "";
+
+  const candidates = [];
+  try {
+    for (const entry of fs.readdirSync(codexBinRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(codexBinRoot, entry.name, "codex.exe");
+      if (fs.existsSync(candidate)) candidates.push(candidate);
+    }
+  } catch {
+    return "";
+  }
+
+  const rootCandidate = path.join(codexBinRoot, "codex.exe");
+  if (fs.existsSync(rootCandidate)) candidates.push(rootCandidate);
+
+  return candidates
+    .map((candidate) => {
+      try {
+        return { candidate, mtimeMs: fs.statSync(candidate).mtimeMs };
+      } catch {
+        return { candidate, mtimeMs: 0 };
+      }
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.candidate || "";
+}
+
+function resolveCodexCmdPath(value) {
+  const raw = String(value || "").trim();
+  if (!isDefaultCodexCmdPath(raw)) return raw;
+  return findDesktopCodexExecutable() || raw || DEFAULT_SETTINGS.codexCmdPath;
+}
+
 function normalizeCodexModel(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return CODEX_MODEL_IDS.has(normalized) ? normalized : "";
@@ -133,6 +175,7 @@ module.exports = {
   DEFAULT_NAVER_SEARCH_URL,
   DEFAULT_IMAGE_ASPECT_RATIO,
   normalizeCodexModel,
+  resolveCodexCmdPath,
   ensureSettingsFile,
   normalizeImageAspectRatio,
   readSettings,

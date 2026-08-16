@@ -60,6 +60,13 @@ function agentDisplayName(agent) {
   return AGENT_DISPLAY_NAMES[String(agent || "").toLowerCase()] || "Agent";
 }
 
+function shouldRunCodexViaShell(commandPath) {
+  if (process.platform !== "win32") return false;
+  const value = String(commandPath || "");
+  const ext = path.extname(value).toLowerCase();
+  return ext === ".cmd" || ext === ".bat" || !path.isAbsolute(value);
+}
+
 function stripAnsi(value) {
   return String(value || "").replace(/\u001b\[[0-9;]*m/g, "");
 }
@@ -85,6 +92,17 @@ function createCodexUsageLimitError(rateLimitType = "", detail = "") {
   error.code = "CODEX_USAGE_LIMIT";
   error.codexRateLimitType = normalizedType || "unknown";
   error.codexLimitDetail = String(detail || "").slice(0, 1000);
+  return error;
+}
+
+function createCodexExecutionError(message, { model = "", detail = "" } = {}) {
+  const activeModel = model ? ` 현재 Codex 모델: ${model}.` : "";
+  const diagnostic = detail ? `\n마지막 Codex 출력: ${detail}` : "";
+  const error = new Error(`${message}${activeModel} Codex CLI 실행환경, 로그인 상태, 모델 설정을 확인해 주세요.${diagnostic}`);
+  error.code = "CODEX_EXEC_FAILED";
+  error.failurePhase = "codex";
+  error.codexModel = model || "";
+  error.codexExecutionDetail = String(detail || "").slice(0, 1000);
   return error;
 }
 
@@ -1837,7 +1855,7 @@ async function runCodexTask({
     const child = spawn(options.codexCmdPath, args, {
       cwd: options.jobDir,
       windowsHide: false,
-      shell: process.platform === "win32"
+      shell: shouldRunCodexViaShell(options.codexCmdPath)
     });
 
     let settled = false;
@@ -1849,8 +1867,16 @@ async function runCodexTask({
     };
 
     const streamBuffers = { info: "", warn: "" };
+    const diagnosticLines = [];
+    const rememberDiagnosticLine = (line) => {
+      const text = stripAnsi(line).trim();
+      if (!text) return;
+      diagnosticLines.push(text);
+      while (diagnosticLines.length > 8) diagnosticLines.shift();
+    };
     const processOutputLine = (line, level = "info") => {
       if (settled) return;
+      rememberDiagnosticLine(line);
       const limitSignal = detectCodexUsageLimitSignal(line);
       if (limitSignal) {
         const parsedLimitJson = tryParseJsonLine(stripAnsi(line).trim());
@@ -1889,11 +1915,17 @@ async function runCodexTask({
     child.stdout.on("data", (chunk) => handleChunk(chunk));
     child.stderr.on("data", (chunk) => handleChunk(chunk, "warn"));
     child.stdin.end(prompt);
-    child.on("error", (error) => settle(new Error(`codex.cmd 실행 실패: ${error.message}`)));
+    child.on("error", (error) => settle(createCodexExecutionError(
+      `codex.cmd 실행 실패: ${error.message}`,
+      { model: codexModel, detail: diagnosticLines.join("\n") }
+    )));
     child.on("close", (code) => {
       flushStreamBuffers();
       if (code === 0) settle();
-      else settle(new Error(`codex.cmd가 종료 코드 ${code}로 실패했습니다.`));
+      else settle(createCodexExecutionError(
+        `codex.cmd가 종료 코드 ${code}로 실패했습니다.`,
+        { model: codexModel, detail: diagnosticLines.join("\n") }
+      ));
     });
   });
 
@@ -1968,7 +2000,7 @@ async function fetchCodexUsageSnapshot({
     ], {
       cwd,
       windowsHide: true,
-      shell: process.platform === "win32"
+      shell: shouldRunCodexViaShell(codexCmdPath)
     });
 
     let settled = false;

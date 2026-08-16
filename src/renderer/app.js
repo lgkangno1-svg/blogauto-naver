@@ -123,6 +123,7 @@ function setRunState(status, detail = "") {
     generated: "success",
     failed: "danger",
     codex_usage_limit: "danger",
+    codex_exec_failed: "danger",
     session_expired: "danger",
     duplicate_retry: "warning",
     publishing: "info",
@@ -133,6 +134,7 @@ function setRunState(status, detail = "") {
     generated: "생성",
     failed: "실패",
     codex_usage_limit: "한도초과",
+    codex_exec_failed: "Codex실패",
     session_expired: "세션만료",
     duplicate_retry: "중복",
     publishing: "발행",
@@ -166,7 +168,7 @@ function addLog(payload) {
 
 function shouldRetryAutoResult(result) {
   const status = String(result?.status || "").toLowerCase();
-  return !["success", "generated", "codex_usage_limit", "session_expired"].includes(status);
+  return !["success", "generated", "codex_usage_limit", "codex_exec_failed", "session_expired"].includes(status);
 }
 
 function autoAttemptLimitForResult(result) {
@@ -274,6 +276,7 @@ function statusBadge(status) {
     generated: "success",
     failed: "danger",
     codex_usage_limit: "danger",
+    codex_exec_failed: "danger",
     session_expired: "danger",
     duplicate_retry: "warning",
     publishing: "info",
@@ -284,6 +287,7 @@ function statusBadge(status) {
     generated: "생성",
     failed: "실패",
     codex_usage_limit: "한도초과",
+    codex_exec_failed: "Codex실패",
     session_expired: "세션만료",
     duplicate_retry: "중복",
     publishing: "발행",
@@ -998,6 +1002,12 @@ function fillCategoryForm(category = null) {
   $("#categoryTrustBlogAsSource").checked = category?.trustBlogAsSource === true;
 }
 
+function findCategoryById(account, categoryId) {
+  const id = String(categoryId || "");
+  if (!id || !Array.isArray(account?.categories)) return null;
+  return account.categories.find((category) => String(category.id || "") === id) || null;
+}
+
 function clearCategoryForm() {
   state.editingCategoryId = "";
   fillCategoryForm(null);
@@ -1008,8 +1018,9 @@ function editCategory(category) {
   if (!category) return;
   state.editingCategoryId = category.id || "";
   state.categoryManagerOpen = true;
+  const currentCategory = findCategoryById(selectedAccount(), state.editingCategoryId) || category;
   renderCategories();
-  fillCategoryForm(category);
+  fillCategoryForm(currentCategory);
   setCategoryButtonLabel();
   $("#categoryName")?.focus();
 }
@@ -1475,6 +1486,15 @@ async function startAutoPublishing(startTargetKey = "") {
         state.autoRunning = false;
         break autoLoop;
       }
+      if (result?.status === "codex_exec_failed") {
+        addLog({
+          level: "error",
+          message: `Codex 실행 실패로 자동 작업을 중지합니다: ${autoResultReason(result)}`,
+          at: new Date().toISOString()
+        });
+        state.autoRunning = false;
+        break autoLoop;
+      }
       if (result?.status === "session_expired") {
         target.account.sessionStatus = "expired";
         if (allNaverSessionsExpired(getAutoTargets())) {
@@ -1632,6 +1652,11 @@ async function boot() {
     state.accountStore = store;
     renderAccounts();
     fillAccountForm(selectedAccount());
+    const editingCategory = findCategoryById(selectedAccount(), state.editingCategoryId);
+    if (editingCategory) {
+      fillCategoryForm(editingCategory);
+      setCategoryButtonLabel();
+    }
   });
   window.blogAuto.onLog(addLog);
   window.blogAuto.onStatus((payload) => {

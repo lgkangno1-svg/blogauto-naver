@@ -189,6 +189,14 @@ const path = require("node:path");
             id: "cat_smoke_delete",
             name: "Smoke Category",
             keyword: "smoke keyword",
+            excludedTopics: "smoke excluded topic",
+            publishPurpose: "smoke publish purpose",
+            preferredTone: "smoke preferred tone",
+            freshnessLevel: "high",
+            searchChannel: "news",
+            primarySearchProvider: "google",
+            fallbackSearchProvider: "naver",
+            trustBlogAsSource: true,
             checked: true
           }]
         }]
@@ -205,6 +213,37 @@ const path = require("node:path");
     if (!samplePreviewImages) {
       throw new Error("Account sample image preview did not render.");
     }
+    await window.locator(".category-row").filter({ hasText: "Smoke Category" }).locator("[data-action='edit']").click();
+    const categoryEditSnapshot = await window.evaluate(() => ({
+      name: document.querySelector("#categoryName")?.value || "",
+      keyword: document.querySelector("#categoryKeyword")?.value || "",
+      excludedTopics: document.querySelector("#categoryExcludedTopics")?.value || "",
+      publishPurpose: document.querySelector("#categoryPublishPurpose")?.value || "",
+      preferredTone: document.querySelector("#categoryPreferredTone")?.value || "",
+      freshnessLevel: document.querySelector("#categoryFreshnessLevel")?.value || "",
+      searchChannel: document.querySelector("#categorySearchChannel")?.value || "",
+      primarySearchProvider: document.querySelector("#categoryPrimarySearchProvider")?.value || "",
+      fallbackSearchProvider: document.querySelector("#categoryFallbackSearchProvider")?.value || "",
+      trustBlogAsSource: document.querySelector("#categoryTrustBlogAsSource")?.checked === true
+    }));
+    const expectedCategoryEditSnapshot = {
+      name: "Smoke Category",
+      keyword: "smoke keyword",
+      excludedTopics: "smoke excluded topic",
+      publishPurpose: "smoke publish purpose",
+      preferredTone: "smoke preferred tone",
+      freshnessLevel: "high",
+      searchChannel: "news",
+      primarySearchProvider: "google",
+      fallbackSearchProvider: "naver",
+      trustBlogAsSource: true
+    };
+    for (const [field, expected] of Object.entries(expectedCategoryEditSnapshot)) {
+      if (categoryEditSnapshot[field] !== expected) {
+        throw new Error(`Category edit field ${field} did not load: expected ${expected}, got ${categoryEditSnapshot[field]}`);
+      }
+    }
+    await window.evaluate(() => document.querySelector("#toggleCategoryManagerButton")?.click());
     const autoRetryCalls = await window.evaluate(async () => {
       if (typeof window.startAutoPublishing !== "function") {
         throw new Error("startAutoPublishing is not available for renderer smoke test.");

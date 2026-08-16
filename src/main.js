@@ -11,7 +11,7 @@ const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunn
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession, verifyOpenNaverSession } = require("./lib/naverPublisher");
 const { publishToTistory, checkTistorySession } = require("./lib/tistoryPublisher");
-const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, readSettings, writeSettings } = require("./lib/settings");
+const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, resolveCodexCmdPath, readSettings, writeSettings } = require("./lib/settings");
 const {
   ensureAccountStoreFile,
   readAccountStore,
@@ -1025,7 +1025,7 @@ async function startJob(form) {
   const naverId = String(form.naverId || account.naverId || "").trim();
   const blogId = String(form.blogId || account.blogId || naverId).trim();
   const naverPassword = String(form.naverPassword || account.naverPassword || "");
-  const codexCmdPath = String(form.codexCmdPath || "codex.cmd").trim();
+  const codexCmdPath = resolveCodexCmdPath(form.codexCmdPath || settings.codexCmdPath);
   const codexModel = normalizeCodexModel(form.codexModel || settings.codexModel);
   const publishVisibility = String(form.publishVisibility || (form.publishPrivate === false ? "public" : "private"));
   const publishPrivate = publishVisibility !== "public";
@@ -1761,7 +1761,9 @@ async function startJob(form) {
   } catch (error) {
     const failedStatus = error.code === "SESSION_EXPIRED"
       ? "session_expired"
-      : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit" : "failed";
+      : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"
+        : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"
+          : "failed";
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
     if (failedStatus === "session_expired" && account.id) {
       updateAccountSession(runtimeRoot, account.id, "expired", settings);
@@ -1845,7 +1847,7 @@ app.whenReady().then(() => {
     const settings = readSettings(runtimeRoot);
     return {
       runtimeRoot,
-      codexCmdPath: "codex.cmd",
+      codexCmdPath: resolveCodexCmdPath(settings.codexCmdPath),
       chrome: detectChromeInstall(),
       settings,
       accountStore: withAccountImageUrls(runtimeRoot, readAccountStore(runtimeRoot, settings)),
@@ -1880,7 +1882,7 @@ app.whenReady().then(() => {
     let snapshot;
     try {
       snapshot = await fetchCodexUsageSnapshot({
-        codexCmdPath: String(settings.codexCmdPath || "codex.cmd").trim(),
+        codexCmdPath: resolveCodexCmdPath(settings.codexCmdPath),
         cwd: runtimeRoot
       });
     } catch (error) {
