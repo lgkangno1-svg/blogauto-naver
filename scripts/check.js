@@ -1849,6 +1849,43 @@ if (clearAiMark && /\bthrow\b/.test(clearAiMark.content)) {
   failed = true;
   console.error("src/lib/naverPublisher.js: AI image mark helper must log and continue instead of throwing");
 }
+const restoreEditorFocusAfterAiMark = extractFunctionBlock(
+  sourceFiles.naverPublisher,
+  "async function restoreEditorFocusAfterAiMark",
+  "AI image mark focus restoration helper"
+);
+if (
+  restoreEditorFocusAfterAiMark
+  && (
+    !restoreEditorFocusAfterAiMark.content.includes("active?.blur?.()")
+    || !restoreEditorFocusAfterAiMark.content.includes("imageLocator.boundingBox()")
+    || !restoreEditorFocusAfterAiMark.content.includes("page.mouse.click")
+    || !restoreEditorFocusAfterAiMark.content.includes("isAiMarkToggleSelected(toggleLocator)")
+  )
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: AI image mark helper must blur the toggle and restore image editor focus before follow-up Enter keys");
+}
+if (clearAiMark) {
+  const focusRestoreCalls = clearAiMark.content.match(/restoreEditorFocusAfterAiMark\(page, candidate\.item/g) || [];
+  if (focusRestoreCalls.length < 4) {
+    failed = true;
+    console.error("src/lib/naverPublisher.js: every successful AI image mark path must restore editor focus");
+  }
+}
+const prepareBodyAfterTitleImage = extractFunctionBlock(
+  sourceFiles.naverPublisher,
+  "async function prepareBodyAfterTitleImage",
+  "title image body focus helper"
+);
+if (prepareBodyAfterTitleImage) {
+  const editorClickIndex = prepareBodyAfterTitleImage.content.indexOf("safeClickLocator(page, editor");
+  const firstEnterIndex = prepareBodyAfterTitleImage.content.indexOf('page.keyboard.press("Enter")');
+  if (editorClickIndex === -1 || firstEnterIndex === -1 || editorClickIndex > firstEnterIndex) {
+    failed = true;
+    console.error("src/lib/naverPublisher.js: title image flow must focus the body editor before sending Enter");
+  }
+}
 const publishToNaver = extractFunctionBlock(sourceFiles.naverPublisher, "async function publishToNaver", "publishToNaver function");
 if (publishToNaver && !publishToNaver.content.includes("발행 단계에서 블로그 글쓰기 URL로 다시 접근했습니다.")) {
   failed = true;

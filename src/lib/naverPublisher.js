@@ -1358,6 +1358,34 @@ async function clickAiMarkToggle(page, locator, log, label) {
   });
 }
 
+async function restoreEditorFocusAfterAiMark(page, imageLocator, toggleLocator) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await toggleLocator.evaluate((element) => {
+      const active = element.ownerDocument?.activeElement;
+      const wrapper = element.closest?.(".se-set-ai-mark-button");
+      if (active === element || wrapper?.contains(active)) {
+        active?.blur?.();
+      }
+      element.blur?.();
+    }).catch(() => {});
+
+    const box = await imageLocator.boundingBox().catch(() => null);
+    if (box) {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    }
+    await sleep(180);
+    const toggleFocused = await toggleLocator.evaluate((element) => {
+      const active = element.ownerDocument?.activeElement;
+      const wrapper = element.closest?.(".se-set-ai-mark-button");
+      return active === element || Boolean(wrapper?.contains(active));
+    }).catch(() => true);
+    if (!toggleFocused && await isAiMarkToggleSelected(toggleLocator)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function clearAiMarkForLatestImage(page, log, label = "이미지") {
   try {
     const imageCandidates = await collectVisibleLocators(page, [
@@ -1393,8 +1421,12 @@ async function clearAiMarkForLatestImage(page, log, label = "이미지") {
         "button.se-set-ai-mark-button-toggle[aria-checked='true']"
       ], 800).catch(() => null);
       if (selectedToggle) {
-        log(`${label} AI 활용 설정이 이미 켜져 있습니다.`);
-        return true;
+        if (await restoreEditorFocusAfterAiMark(page, candidate.item, selectedToggle)) {
+          log(`${label} AI 활용 설정이 이미 켜져 있습니다.`);
+          return true;
+        }
+        log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+        return false;
       }
 
       const aiMarkButton = await findVisibleLocator(page, [
@@ -1404,8 +1436,12 @@ async function clearAiMarkForLatestImage(page, log, label = "이미지") {
       ], 500).catch(() => null);
       if (aiMarkButton) {
         if (await isAiMarkToggleSelected(aiMarkButton)) {
-          log(`${label} AI 활용 설정이 이미 켜져 있습니다.`);
-          return true;
+          if (await restoreEditorFocusAfterAiMark(page, candidate.item, aiMarkButton)) {
+            log(`${label} AI 활용 설정이 이미 켜져 있습니다.`);
+            return true;
+          }
+          log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+          return false;
         }
 
         await clickAiMarkToggle(page, aiMarkButton, log, `${label} AI 활용 설정`);
@@ -1418,15 +1454,23 @@ async function clearAiMarkForLatestImage(page, log, label = "이미지") {
           "button.se-set-ai-mark-button-toggle[aria-checked='true']"
         ], 1000).catch(() => null);
         if (enabledToggle || await isAiMarkToggleSelected(aiMarkButton)) {
-          log(`${label} AI 활용 설정을 켰습니다.`);
-          return true;
+          if (await restoreEditorFocusAfterAiMark(page, candidate.item, enabledToggle || aiMarkButton)) {
+            log(`${label} AI 활용 설정을 켰습니다.`);
+            return true;
+          }
+          log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+          return false;
         }
 
         await clickAiMarkToggle(page, aiMarkButton, log, `${label} AI 활용 설정 재시도`);
         await sleep(450);
         if (await isAiMarkToggleSelected(aiMarkButton)) {
-          log(`${label} AI 활용 설정을 켰습니다.`);
-          return true;
+          if (await restoreEditorFocusAfterAiMark(page, candidate.item, aiMarkButton)) {
+            log(`${label} AI 활용 설정을 켰습니다.`);
+            return true;
+          }
+          log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+          return false;
         }
 
         log(`${label} AI 활용 설정 토글을 찾았지만 켜진 상태를 확인하지 못했습니다.`, "warn");
@@ -1566,10 +1610,6 @@ async function openQuoteStyleBlock(page, selectors, styleLabel, log) {
 }
 
 async function prepareBodyAfterTitleImage(page, selectors, log) {
-  await page.keyboard.press("Escape").catch(() => {});
-  await page.keyboard.press("End").catch(() => {});
-  await page.keyboard.press("Enter").catch(() => {});
-  await page.keyboard.press("Enter").catch(() => {});
   const editor = await findLowerVisibleLocator(page, bodyEditorSelectors(selectors), 30000);
   await safeClickLocator(page, editor, log, "본문 입력 영역");
   await page.keyboard.press("End").catch(() => {});
