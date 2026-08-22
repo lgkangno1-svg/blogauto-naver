@@ -133,58 +133,62 @@ function allIndexesOf(text, needle) {
   return indexes;
 }
 
+function readSource(...segments) {
+  return fs.readFileSync(path.join(root, ...segments), "utf8").replace(/\r\n?/g, "\n");
+}
+
 const sourceFiles = {
   main: {
     relative: "src/main.js",
-    content: fs.readFileSync(path.join(root, "src", "main.js"), "utf8")
+    content: readSource("src", "main.js")
   },
   codexRunner: {
     relative: "src/lib/codexRunner.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "codexRunner.js"), "utf8")
+    content: readSource("src", "lib", "codexRunner.js")
   },
   naverPublisher: {
     relative: "src/lib/naverPublisher.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "naverPublisher.js"), "utf8")
+    content: readSource("src", "lib", "naverPublisher.js")
   },
   tistoryPublisher: {
     relative: "src/lib/tistoryPublisher.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "tistoryPublisher.js"), "utf8")
+    content: readSource("src", "lib", "tistoryPublisher.js")
   },
   accountStore: {
     relative: "src/lib/accountStore.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "accountStore.js"), "utf8")
+    content: readSource("src", "lib", "accountStore.js")
   },
   imageAssets: {
     relative: "src/lib/imageAssets.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "imageAssets.js"), "utf8")
+    content: readSource("src", "lib", "imageAssets.js")
   },
   rendererIndex: {
     relative: "src/renderer/index.html",
-    content: fs.readFileSync(path.join(root, "src", "renderer", "index.html"), "utf8")
+    content: readSource("src", "renderer", "index.html")
   },
   rendererApp: {
     relative: "src/renderer/app.js",
-    content: fs.readFileSync(path.join(root, "src", "renderer", "app.js"), "utf8")
+    content: readSource("src", "renderer", "app.js")
   },
   rendererStyles: {
     relative: "src/renderer/styles.css",
-    content: fs.readFileSync(path.join(root, "src", "renderer", "styles.css"), "utf8")
+    content: readSource("src", "renderer", "styles.css")
   },
   preload: {
     relative: "src/preload.js",
-    content: fs.readFileSync(path.join(root, "src", "preload.js"), "utf8")
+    content: readSource("src", "preload.js")
   },
   settings: {
     relative: "src/lib/settings.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "settings.js"), "utf8")
+    content: readSource("src", "lib", "settings.js")
   },
   search: {
     relative: "src/lib/search.js",
-    content: fs.readFileSync(path.join(root, "src", "lib", "search.js"), "utf8")
+    content: readSource("src", "lib", "search.js")
   },
   smokeElectron: {
     relative: "scripts/smoke-electron.js",
-    content: fs.readFileSync(path.join(root, "scripts", "smoke-electron.js"), "utf8")
+    content: readSource("scripts", "smoke-electron.js")
   }
 };
 
