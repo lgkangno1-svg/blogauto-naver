@@ -1329,13 +1329,64 @@ async function waitForPostWriteTitle(page, selectors, options, postWriteUrl, log
   throw new Error("블로그 글쓰기 편집기를 제한 시간 안에 찾지 못했습니다. Naver Editor DOM notes 확인이 필요합니다.");
 }
 
+async function collectImageComponentLocators(page) {
+  const selector = ".se-component.se-image[data-compid]";
+  const components = [];
+  for (const root of [page, ...page.frames()]) {
+    const locator = root.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      components.push(locator.nth(index));
+    }
+  }
+  return components;
+}
+
+async function collectImageComponentIds(page) {
+  const components = await collectImageComponentLocators(page);
+  const ids = new Set();
+  for (const component of components) {
+    const id = String(await component.getAttribute("data-compid").catch(() => "") || "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+async function waitForNewImageComponent(page, previousIds, timeout = 20000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const components = await collectImageComponentLocators(page);
+    const seen = new Set();
+    for (const component of components) {
+      const id = String(await component.getAttribute("data-compid").catch(() => "") || "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      if (previousIds.has(id)) continue;
+      const image = component.locator(".se-module-image img.se-image-resource, .se-module-image img").first();
+      const ready = await image.evaluate((element) => {
+        const src = String(element.currentSrc || element.getAttribute("src") || "").trim();
+        const width = Number(element.naturalWidth || element.getAttribute("width") || 0);
+        return Boolean(src) && width >= 80;
+      }).catch(() => false);
+      if (ready) {
+        return component;
+      }
+    }
+    await sleep(300);
+  }
+  return null;
+}
+
 async function insertImageByButton(page, selector, filePath) {
+  const previousImageComponentIds = await collectImageComponentIds(page);
   const chooserPromise = page.waitForEvent("filechooser", { timeout: 10000 });
   const button = await findVisibleLocator(page, selector, 20000);
   await safeClickLocator(page, button);
   const chooser = await chooserPromise;
   await chooser.setFiles(filePath);
-  await sleep(1800);
+  const imageComponent = await waitForNewImageComponent(page, previousImageComponentIds);
+  await sleep(600);
+  return imageComponent;
 }
 
 async function isAiMarkToggleSelected(locator) {
@@ -1347,6 +1398,15 @@ async function isAiMarkToggleSelected(locator) {
       || element.getAttribute("aria-pressed") === "true"
       || element.getAttribute("aria-checked") === "true";
   }).catch(() => false);
+}
+
+async function waitForAiMarkToggleSelected(locator, timeout = 1500) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await isAiMarkToggleSelected(locator)) return true;
+    await sleep(120);
+  }
+  return false;
 }
 
 async function clickAiMarkToggle(page, locator, log, label) {
@@ -1386,99 +1446,60 @@ async function restoreEditorFocusAfterAiMark(page, imageLocator, toggleLocator) 
   return false;
 }
 
-async function clearAiMarkForLatestImage(page, log, label = "이미지") {
+async function ensureAiMarkForImageComponent(page, imageComponent, log, label = "이미지") {
   try {
-    const imageCandidates = await collectVisibleLocators(page, [
-      ".se-module-image img",
-      ".se-image img",
-      ".se-section-image img",
-      ".se-component img",
-      "img"
-    ]);
-    const largeImages = [];
-    for (const item of imageCandidates) {
-      const box = await item.boundingBox().catch(() => null);
-      if (box && box.width >= 80 && box.height >= 60) {
-        largeImages.push({ item, box });
-      }
+    if (!imageComponent) {
+      log(`${label}의 새 이미지 컴포넌트를 식별하지 못해 AI 활용 설정을 건너뜁니다.`, "warn");
+      return false;
     }
 
-    for (const candidate of largeImages.slice(-5).reverse()) {
-      await candidate.item.scrollIntoViewIfNeeded().catch(() => {});
-      await page.mouse.move(
-        candidate.box.x + candidate.box.width / 2,
-        candidate.box.y + candidate.box.height / 2,
-        { steps: 8 }
-      ).catch(() => {});
-      await candidate.item.hover({ timeout: 1200 }).catch(() => {});
-      await sleep(350);
+    const componentId = String(await imageComponent.getAttribute("data-compid").catch(() => "") || "").trim();
+    const imageLocator = imageComponent.locator(
+      ".se-module-image img.se-image-resource, .se-module-image img"
+    ).first();
+    await imageComponent.scrollIntoViewIfNeeded().catch(() => {});
+    await imageLocator.hover({ timeout: 2000 }).catch(() => {});
+    await sleep(350);
 
-      const selectedToggle = await findVisibleLocator(page, [
-        ".se-set-ai-mark-button-toggle.se-is-selected",
-        ".se-set-ai-mark-button.se-is-selected .se-set-ai-mark-button-toggle",
-        ".se-set-ai-mark-button.se-is-selected button",
-        "button.se-set-ai-mark-button-toggle[aria-pressed='true']",
-        "button.se-set-ai-mark-button-toggle[aria-checked='true']"
-      ], 800).catch(() => null);
-      if (selectedToggle) {
-        if (await restoreEditorFocusAfterAiMark(page, candidate.item, selectedToggle)) {
-          log(`${label} AI 활용 설정이 이미 켜져 있습니다.`);
-          return true;
-        }
-        log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
-        return false;
-      }
-
-      const aiMarkButton = await findVisibleLocator(page, [
-        ".se-set-ai-mark-button .se-set-ai-mark-button-toggle",
-        ".se-set-ai-mark-button button",
-        ".se-set-ai-mark-button-toggle"
-      ], 500).catch(() => null);
-      if (aiMarkButton) {
-        if (await isAiMarkToggleSelected(aiMarkButton)) {
-          if (await restoreEditorFocusAfterAiMark(page, candidate.item, aiMarkButton)) {
-            log(`${label} AI 활용 설정이 이미 켜져 있습니다.`);
-            return true;
-          }
-          log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
-          return false;
-        }
-
-        await clickAiMarkToggle(page, aiMarkButton, log, `${label} AI 활용 설정`);
-        await sleep(450);
-        const enabledToggle = await findVisibleLocator(page, [
-          ".se-set-ai-mark-button-toggle.se-is-selected",
-          ".se-set-ai-mark-button.se-is-selected .se-set-ai-mark-button-toggle",
-          ".se-set-ai-mark-button.se-is-selected button",
-          "button.se-set-ai-mark-button-toggle[aria-pressed='true']",
-          "button.se-set-ai-mark-button-toggle[aria-checked='true']"
-        ], 1000).catch(() => null);
-        if (enabledToggle || await isAiMarkToggleSelected(aiMarkButton)) {
-          if (await restoreEditorFocusAfterAiMark(page, candidate.item, enabledToggle || aiMarkButton)) {
-            log(`${label} AI 활용 설정을 켰습니다.`);
-            return true;
-          }
-          log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
-          return false;
-        }
-
-        await clickAiMarkToggle(page, aiMarkButton, log, `${label} AI 활용 설정 재시도`);
-        await sleep(450);
-        if (await isAiMarkToggleSelected(aiMarkButton)) {
-          if (await restoreEditorFocusAfterAiMark(page, candidate.item, aiMarkButton)) {
-            log(`${label} AI 활용 설정을 켰습니다.`);
-            return true;
-          }
-          log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
-          return false;
-        }
-
-        log(`${label} AI 활용 설정 토글을 찾았지만 켜진 상태를 확인하지 못했습니다.`, "warn");
-        return false;
-      }
+    const aiMarkButton = imageComponent.locator(".se-set-ai-mark-button-toggle").first();
+    const toggleVisible = await aiMarkButton.waitFor({ state: "visible", timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!toggleVisible) {
+      log(`${label}(${componentId || "unknown"}) 내부에서 AI 활용 설정 토글을 찾지 못했습니다.`, "warn");
+      return false;
     }
 
-    log(`${label} AI 활용 설정 위치를 찾지 못해 건너뜁니다.`, "warn");
+    if (await isAiMarkToggleSelected(aiMarkButton)) {
+      if (await restoreEditorFocusAfterAiMark(page, imageLocator, aiMarkButton)) {
+        log(`${label} AI 활용 설정이 이미 켜져 있습니다. (${componentId || "unknown"})`);
+        return true;
+      }
+      log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+      return false;
+    }
+
+    await clickAiMarkToggle(page, aiMarkButton, log, `${label} AI 활용 설정`);
+    if (await waitForAiMarkToggleSelected(aiMarkButton)) {
+      if (await restoreEditorFocusAfterAiMark(page, imageLocator, aiMarkButton)) {
+        log(`${label} AI 활용 설정을 켰습니다. (${componentId || "unknown"})`);
+        return true;
+      }
+      log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+      return false;
+    }
+
+    await clickAiMarkToggle(page, aiMarkButton, log, `${label} AI 활용 설정 재시도`);
+    if (await waitForAiMarkToggleSelected(aiMarkButton)) {
+      if (await restoreEditorFocusAfterAiMark(page, imageLocator, aiMarkButton)) {
+        log(`${label} AI 활용 설정을 켰습니다. (${componentId || "unknown"})`);
+        return true;
+      }
+      log(`${label} AI 활용 설정은 켜졌지만 토글 포커스를 해제하지 못했습니다.`, "warn");
+      return false;
+    }
+
+    log(`${label} AI 활용 설정 토글을 찾았지만 켜진 상태를 확인하지 못했습니다.`, "warn");
   } catch (error) {
     log(`${label} AI 활용 설정 확인을 건너뜁니다: ${error.message.split("\n")[0]}`, "warn");
   }
@@ -1882,8 +1903,8 @@ async function insertArticleWithImages(page, selectors, article, bodyImages, opt
 
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
-    await insertImageByButton(page, selectors.imageButton, image.path);
-    await clearAiMarkForLatestImage(page, log, `본문 이미지 ${block.sequence}`);
+    const imageComponent = await insertImageByButton(page, selectors.imageButton, image.path);
+    await ensureAiMarkForImageComponent(page, imageComponent, log, `본문 이미지 ${block.sequence}`);
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
     log(`본문 이미지 ${block.sequence} 삽입 완료`);
@@ -2448,8 +2469,8 @@ async function publishToNaver(options) {
         throw new Error("타이틀 이미지 삽입용 imageButton selector가 필요합니다.");
       }
       await assertNaverSessionActive(page, selectors, log, "타이틀 이미지 삽입 전");
-      await insertImageByButton(page, selectors.imageButton, options.titleImagePath);
-      await clearAiMarkForLatestImage(page, log, "타이틀 이미지");
+      const titleImageComponent = await insertImageByButton(page, selectors.imageButton, options.titleImagePath);
+      await ensureAiMarkForImageComponent(page, titleImageComponent, log, "타이틀 이미지");
       log("타이틀 이미지 삽입 완료");
       await assertNaverSessionActive(page, selectors, log, "타이틀 이미지 삽입");
       await prepareBodyAfterTitleImage(page, selectors, log);

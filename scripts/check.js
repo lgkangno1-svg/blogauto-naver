@@ -1840,12 +1840,57 @@ if (insertArticleWithImages && !sourceFiles.naverPublisher.content.includes("\\]
   failed = true;
   console.error("src/lib/naverPublisher.js: SECTION marker parser must tolerate a missing closing bracket");
 }
-const clearAiMark = extractFunctionBlock(sourceFiles.naverPublisher, "async function clearAiMarkForLatestImage", "AI image mark helper");
-if (clearAiMark && !clearAiMark.content.includes(".se-set-ai-mark-button.se-is-selected")) {
+const collectImageComponentIds = extractFunctionBlock(
+  sourceFiles.naverPublisher,
+  "async function collectImageComponentIds",
+  "Naver image component ID collector"
+);
+if (
+  collectImageComponentIds
+  && (
+    !collectImageComponentIds.content.includes('getAttribute("data-compid")')
+    || !sourceFiles.naverPublisher.content.includes("async function collectImageComponentLocators")
+    || sourceFiles.naverPublisher.content.includes('collectVisibleLocators(page, ".se-component.se-image[data-compid]")')
+  )
+) {
   failed = true;
-  console.error("src/lib/naverPublisher.js: AI image mark helper must target selected Naver AI mark toggles");
+  console.error("src/lib/naverPublisher.js: image uploads must snapshot every data-compid, including offscreen components");
 }
-if (clearAiMark && /\bthrow\b/.test(clearAiMark.content)) {
+const waitForNewImageComponent = extractFunctionBlock(
+  sourceFiles.naverPublisher,
+  "async function waitForNewImageComponent",
+  "new Naver image component detector"
+);
+if (
+  waitForNewImageComponent
+  && (
+    !waitForNewImageComponent.content.includes("previousIds.has(id)")
+    || !waitForNewImageComponent.content.includes("seen.has(id)")
+    || !waitForNewImageComponent.content.includes("return component")
+  )
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: image uploads must identify one new deduplicated data-compid component");
+}
+const ensureAiMark = extractFunctionBlock(
+  sourceFiles.naverPublisher,
+  "async function ensureAiMarkForImageComponent",
+  "scoped AI image mark helper"
+);
+if (
+  ensureAiMark
+  && (
+    !ensureAiMark.content.includes('imageComponent.locator(".se-set-ai-mark-button-toggle")')
+    || !ensureAiMark.content.includes('getAttribute("data-compid")')
+    || !ensureAiMark.content.includes("waitForAiMarkToggleSelected(aiMarkButton)")
+    || ensureAiMark.content.includes("findVisibleLocator(page")
+    || ensureAiMark.content.includes("slice(-5)")
+  )
+) {
+  failed = true;
+  console.error("src/lib/naverPublisher.js: AI image marking must stay scoped to the newly inserted image component");
+}
+if (ensureAiMark && /\bthrow\b/.test(ensureAiMark.content)) {
   failed = true;
   console.error("src/lib/naverPublisher.js: AI image mark helper must log and continue instead of throwing");
 }
@@ -1866,9 +1911,9 @@ if (
   failed = true;
   console.error("src/lib/naverPublisher.js: AI image mark helper must blur the toggle and restore image editor focus before follow-up Enter keys");
 }
-if (clearAiMark) {
-  const focusRestoreCalls = clearAiMark.content.match(/restoreEditorFocusAfterAiMark\(page, candidate\.item/g) || [];
-  if (focusRestoreCalls.length < 4) {
+if (ensureAiMark) {
+  const focusRestoreCalls = ensureAiMark.content.match(/restoreEditorFocusAfterAiMark\(page, imageLocator/g) || [];
+  if (focusRestoreCalls.length < 3) {
     failed = true;
     console.error("src/lib/naverPublisher.js: every successful AI image mark path must restore editor focus");
   }
@@ -1914,9 +1959,12 @@ if (publishToNaver) {
     failed = true;
     console.error("src/lib/naverPublisher.js: publishToNaver must open publish settings via the element-only publish helper and verify the layer");
   }
-  if (!publishToNaver.content.includes("clearAiMarkForLatestImage(page, log")) {
+  if (
+    !publishToNaver.content.includes("const titleImageComponent = await insertImageByButton")
+    || !publishToNaver.content.includes("ensureAiMarkForImageComponent(page, titleImageComponent")
+  ) {
     failed = true;
-    console.error("src/lib/naverPublisher.js: title image insertion must attempt to clear Naver AI image mark");
+    console.error("src/lib/naverPublisher.js: title image insertion must mark its newly inserted image component");
   }
 }
 if (
@@ -1928,9 +1976,15 @@ if (
   console.error("src/lib/naverPublisher.js: publishButton selector must not use broad 발행 text fallbacks");
 }
 
-if (insertArticleWithImages && !insertArticleWithImages.content.includes("clearAiMarkForLatestImage(page, log")) {
+if (
+  insertArticleWithImages
+  && (
+    !insertArticleWithImages.content.includes("const imageComponent = await insertImageByButton")
+    || !insertArticleWithImages.content.includes("ensureAiMarkForImageComponent(page, imageComponent")
+  )
+) {
   failed = true;
-  console.error("src/lib/naverPublisher.js: body image insertion must attempt to clear Naver AI image mark");
+  console.error("src/lib/naverPublisher.js: every body image must mark its own newly inserted component");
 }
 
 if (failed) {
