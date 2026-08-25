@@ -72,8 +72,96 @@ function buildJobTokenDiagnostics(tokenUsage = {}) {
   };
 }
 
+function historyTokenFields(tokenUsage = {}) {
+  const diagnostics = tokenUsage?.diagnostics?.total !== undefined
+    ? tokenUsage.diagnostics
+    : buildJobTokenDiagnostics(tokenUsage);
+  return {
+    token_total: asTokenNumber(diagnostics.total),
+    token_gross_total: Math.max(asTokenNumber(diagnostics.total), asTokenNumber(diagnostics.grossTotal)),
+    token_saved: asTokenNumber(diagnostics.savedTokens),
+    token_savings_percent: Number.isFinite(Number(diagnostics.savingsPercent))
+      ? Number(Number(diagnostics.savingsPercent).toFixed(1))
+      : 0,
+    token_agents: normalizeAgentMap(diagnostics.agents),
+    token_gross_agents: normalizeAgentMap(diagnostics.grossAgents),
+    token_largest_agent: String(diagnostics.largestAgent?.agent || "")
+  };
+}
+
+function median(values = []) {
+  const sorted = values
+    .map(asTokenNumber)
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+function summarizeHistoryTokenDiagnostics(history = [], {
+  blogId = "",
+  limit = 20
+} = {}) {
+  const rows = (Array.isArray(history) ? history : [])
+    .filter((entry) => !blogId || String(entry?.blog_id || "") === String(blogId))
+    .filter((entry) => asTokenNumber(entry?.token_total) > 0)
+    .slice(0, Math.max(1, Number(limit) || 20));
+  if (!rows.length) {
+    return {
+      sampleCount: 0,
+      averageTotal: 0,
+      medianTotal: 0,
+      averageGrossTotal: 0,
+      averageSaved: 0,
+      averageSavingsPercent: 0,
+      largestAgent: "",
+      latestTotal: 0,
+      previousAverageTotal: 0,
+      latestVsPreviousPercent: 0,
+      anomaly: false
+    };
+  }
+
+  const total = rows.reduce((sum, row) => sum + asTokenNumber(row.token_total), 0);
+  const grossTotal = rows.reduce((sum, row) => sum + Math.max(asTokenNumber(row.token_total), asTokenNumber(row.token_gross_total)), 0);
+  const savedTotal = rows.reduce((sum, row) => sum + asTokenNumber(row.token_saved), 0);
+  const agentTotals = {};
+  for (const row of rows) {
+    for (const [agent, amount] of Object.entries(row.token_agents || {})) {
+      agentTotals[agent] = (agentTotals[agent] || 0) + asTokenNumber(amount);
+    }
+  }
+  const largestAgent = Object.entries(agentTotals)
+    .sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  const latestTotal = asTokenNumber(rows[0]?.token_total);
+  const previousRows = rows.slice(1);
+  const previousAverageTotal = previousRows.length
+    ? Math.round(previousRows.reduce((sum, row) => sum + asTokenNumber(row.token_total), 0) / previousRows.length)
+    : 0;
+  const latestVsPreviousPercent = previousAverageTotal > 0
+    ? Number((((latestTotal - previousAverageTotal) / previousAverageTotal) * 100).toFixed(1))
+    : 0;
+
+  return {
+    sampleCount: rows.length,
+    averageTotal: Math.round(total / rows.length),
+    medianTotal: median(rows.map((row) => row.token_total)),
+    averageGrossTotal: Math.round(grossTotal / rows.length),
+    averageSaved: Math.round(savedTotal / rows.length),
+    averageSavingsPercent: grossTotal > 0 ? Number(((savedTotal / grossTotal) * 100).toFixed(1)) : 0,
+    largestAgent,
+    latestTotal,
+    previousAverageTotal,
+    latestVsPreviousPercent,
+    anomaly: previousRows.length >= 3 && latestVsPreviousPercent >= 50
+  };
+}
+
 module.exports = {
   AGENT_ORDER,
   buildJobTokenDiagnostics,
-  _private: { asTokenNumber, normalizeAgentMap, sumTokens }
+  historyTokenFields,
+  summarizeHistoryTokenDiagnostics,
+  _private: { asTokenNumber, normalizeAgentMap, sumTokens, median }
 };
