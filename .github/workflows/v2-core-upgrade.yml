@@ -23,11 +23,13 @@ on:
       - "scripts/apply-v2-source-cache.js"
       - "scripts/apply-v2-adaptive-contract.js"
       - "scripts/apply-v2-job-diagnostics.js"
+      - "scripts/apply-v2-history-diagnostics.js"
       - "scripts/check-v2.js"
       - "scripts/check-v2-early-title-gate.js"
       - "scripts/check-v2-source-cache.js"
       - "scripts/check-v2-adaptive-contract.js"
       - "scripts/check-v2-job-diagnostics.js"
+      - "scripts/check-v2-history-diagnostics.js"
       - ".github/workflows/v2-core-upgrade.yml"
 
 permissions:
@@ -98,6 +100,13 @@ jobs:
           node --check src/main.js
           node --check src/renderer/app.js
 
+      - name: Apply durable token history diagnostics and verify
+        run: |
+          node scripts/apply-v2-history-diagnostics.js
+          node --check src/lib/jobDiagnostics.js
+          node --check src/main.js
+          node --check src/renderer/app.js
+
       - name: Syntax check V2 policy modules
         run: |
           node --check src/lib/qualityGate.js
@@ -117,6 +126,7 @@ jobs:
           node scripts/check-v2-source-cache.js
           node scripts/check-v2-adaptive-contract.js
           node scripts/check-v2-job-diagnostics.js
+          node scripts/check-v2-history-diagnostics.js
 
       - name: Run repository checks
         run: npm run check
@@ -131,5 +141,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/codexRunner.js src/lib/naverPublisher.js src/lib/settings.js src/lib/search.js src/main.js src/renderer/index.html src/renderer/app.js
-          git commit -m "feat: integrate V2 evidence quality token UI publish safety partial repair duplicate gate cache adaptive contract and diagnostics"
+          git commit -m "feat: integrate V2 evidence quality token UI publish safety partial repair duplicate gate cache adaptive contract and durable diagnostics"
           git push origin HEAD:upgrade/best-of-v2
