@@ -9,8 +9,10 @@ on:
       - "src/lib/qualityGate.js"
       - "src/lib/tokenPolicy.js"
       - "src/lib/evidenceLedger.js"
+      - "src/lib/publishSafety.js"
       - "scripts/apply-v2-core.js"
       - "scripts/apply-v2-ui.js"
+      - "scripts/apply-v2-publish-safety.js"
       - "scripts/check-v2.js"
       - ".github/workflows/v2-core-upgrade.yml"
 
@@ -38,14 +40,18 @@ jobs:
         run: |
           node scripts/apply-v2-core.js
           node scripts/apply-v2-ui.js
+          node scripts/apply-v2-publish-safety.js
 
       - name: Syntax check upgraded modules
         run: |
           node --check src/lib/qualityGate.js
           node --check src/lib/tokenPolicy.js
           node --check src/lib/evidenceLedger.js
+          node --check src/lib/publishSafety.js
           node --check src/lib/codexRunner.js
+          node --check src/lib/naverPublisher.js
           node --check src/lib/settings.js
+          node --check src/main.js
           node --check src/renderer/app.js
 
       - name: Run V2 regression checks
@@ -63,6 +69,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/codexRunner.js src/lib/settings.js src/renderer/index.html src/renderer/app.js
-          git commit -m "feat: integrate V2 evidence quality token and UI policies"
+          git add src/lib/codexRunner.js src/lib/naverPublisher.js src/lib/settings.js src/main.js src/renderer/index.html src/renderer/app.js
+          git commit -m "feat: integrate V2 evidence quality token UI and publish safety policies"
           git push origin HEAD:upgrade/best-of-v2
