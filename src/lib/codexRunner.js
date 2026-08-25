@@ -2,6 +2,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
+const { evaluateArticleQuality } = require("./qualityGate");
+const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 
 const DEFAULT_AGENT_MODELS = {
   main: "high",
@@ -1709,7 +1711,7 @@ async function runCodexTask({
     lastOutputTokens: 0,
     rateLimits: null
   };
-  let taskEffort = modelEffortForAgent(options, agent);
+  let taskEffort = adaptiveEffort(options, agent, modelEffortForAgent(options, agent));
   let finalTokenUsageLogged = false;
   let taskStartedAt = Date.now();
 
@@ -2117,13 +2119,17 @@ async function runCodexGeneration(options, log = () => {}) {
       latestRateLimits = result.tokenUsage.rateLimits;
     }
   };
-  const tokenUsageSnapshot = () => ({
-    total: totalTokens,
-    grossTotal: totalGrossTokens,
-    rateLimits: latestRateLimits,
-    agents: { ...agentTokenTotals },
-    grossAgents: { ...agentGrossTokenTotals }
-  });
+  const tokenUsageSnapshot = () => {
+    const savings = tokenSavings(totalGrossTokens, totalTokens);
+    return {
+      total: totalTokens,
+      grossTotal: totalGrossTokens,
+      rateLimits: latestRateLimits,
+      agents: { ...agentTokenTotals },
+      grossAgents: { ...agentGrossTokenTotals },
+      ...savings
+    };
+  };
 
   const accountImageStyle = effectiveOptions.accountImageStyle || {};
   const sampleImagePath = String(accountImageStyle.sampleImagePath || "").trim();
@@ -2498,7 +2504,7 @@ async function runCodexGeneration(options, log = () => {}) {
     };
   }
 
-  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 1;
+  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 2;
   let writerResult = null;
   let mainReviewResult = null;
   let mainReviewStatus = "";
@@ -2755,6 +2761,43 @@ async function runCodexGeneration(options, log = () => {}) {
         titleImagePath: "",
         notes: compactTextList([writerIssueReason, writerResult?.notes]),
         researchTitleResult: researchResult,
+        tokenUsage: tokenUsageSnapshot()
+      };
+    }
+
+    const deterministicQuality = evaluateArticleQuality({
+      topic: effectiveOptions.topic || finalTitle,
+      title: String(writerResult.title || finalTitle || "").trim(),
+      article: String(writerResult.article || ""),
+      historyTitles: effectiveOptions.historyTitles || [],
+      searchResults: effectiveOptions.searchResults || [],
+      sourceQuality: effectiveOptions.sourceQuality || null
+    });
+    writerResult = { ...writerResult, deterministicQuality };
+
+    if (!deterministicQuality.pass) {
+      const qualityReason = deterministicQuality.repairFeedback || "Deterministic quality gate failed.";
+      log(`무료 품질 게이트 감지: ${qualityReason}`, deterministicQuality.hardBlock ? "warn" : "info", "main");
+      if (attempt < maxReviewAttempts) {
+        writerRevisionFeedback = compactTextList([
+          `Deterministic quality gate repair scope: ${deterministicQuality.repairScope}`,
+          qualityReason
+        ]).join(" / ").slice(0, 3000);
+        log(`Main Agent 호출 전에 Writer가 문제 부분을 먼저 수정합니다 (${attempt + 1}/${maxReviewAttempts})`, "info", "main");
+        continue;
+      }
+      return {
+        status: "failed",
+        failurePhase: "quality_gate",
+        failureReason: qualityReason,
+        title: "",
+        article: "",
+        tags: [],
+        bodyImages: [],
+        titleImagePath: "",
+        notes: deterministicQuality.issues.map((item) => item.message),
+        researchTitleResult: researchResult,
+        deterministicQuality,
         tokenUsage: tokenUsageSnapshot()
       };
     }
