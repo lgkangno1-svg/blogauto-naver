@@ -50,7 +50,8 @@ function buildPartialRepairPrompt({
   deterministicQuality = {},
   topic = "",
   keyword = "",
-  searchResults = []
+  searchResults = [],
+  resultPath = ""
 } = {}) {
   const plan = planPartialRepair(deterministicQuality);
   if (!plan.eligible) return "";
@@ -70,6 +71,7 @@ function buildPartialRepairPrompt({
     "Do not change the title. Research/Title Agent owns the selected title.",
     "Do not add new facts, dates, amounts, percentages, personal experience, products, policies, or claims.",
     "Only change the minimum sentences necessary to resolve the listed deterministic issues.",
+    `Output JSON path: ${resultPath || "writer-partial-repair-result.json"}`,
     "",
     `Topic: ${topic || "(same as selected title)"}`,
     `Keyword: ${keyword || "(none)"}`,
@@ -91,7 +93,8 @@ function buildPartialRepairPrompt({
     "- article_too_long: remove repetition and low-value padding; do not cut supported decision-critical details.",
     "",
     "Required output:",
-    "- Write one JSON object only using this shape:",
+    "- Write the JSON object to the exact Output JSON path. Do not merely print it to stdout.",
+    "- Use this shape:",
     "  {\"status\":\"success\"|\"failed\",\"failureReason\":\"\",\"title\":\"unchanged title\",\"article\":\"repaired article\",\"tags\":[],\"notes\":[]}",
     "- status=failed if the issue cannot be repaired without changing the title, changing the topic, or inventing facts.",
     "- Keep title byte-for-byte identical to the Current draft title when status=success."
