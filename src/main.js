@@ -1509,6 +1509,7 @@ async function startJob(form) {
             ...(Array.isArray(researchResult.uncertainItems) ? researchResult.uncertainItems : [])
           ].filter(Boolean).join(" ");
           const searchResults = await collectSearchResults({
+            runtimeRoot,
             topic: searchTopic,
             keyword: searchKeyword,
             category,

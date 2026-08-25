@@ -1,5 +1,6 @@
 const http = require("node:http");
 const https = require("node:https");
+const { readSourceCache, writeSourceCache, pruneSourceCache } = require("./sourceCache");
 
 const MAX_RESPONSE_CHARS = 1_500_000;
 const MAX_EXCERPT_CHARS = 1400;
@@ -618,7 +619,20 @@ async function mapLimit(items, limit, mapper) {
   return results;
 }
 
-async function fetchCandidateContent(candidate) {
+async function fetchCandidateContent(candidate, options = {}) {
+  const cached = readSourceCache({
+    runtimeRoot: options.runtimeRoot,
+    url: candidate.url,
+    freshnessLevel: options.freshnessLevel
+  });
+  if (cached.hit) {
+    return {
+      ...candidate,
+      ...cached.value,
+      cache: { hit: true, ageMs: cached.ageMs, ttlMs: cached.ttlMs }
+    };
+  }
+
   const attempts = [candidate.url];
   const mobileUrl = mobileNaverBlogUrl(candidate.url);
   if (mobileUrl) attempts.push(mobileUrl);
@@ -645,13 +659,20 @@ async function fetchCandidateContent(candidate) {
       const readable = extractReadableText(html);
       const text = readable.length >= 160 ? readable : description;
       if (text && text.length >= 80) {
-        return {
+        const result = {
           ...candidate,
           fetchedUrl: attemptUrl,
           contentLength: text.length,
           excerpt: text.slice(0, MAX_EXCERPT_CHARS),
-          outboundLinks: uniqueCandidates(outboundLinks).slice(0, MAX_AUTHORITY_LINK_CANDIDATES)
+          outboundLinks: uniqueCandidates(outboundLinks).slice(0, MAX_AUTHORITY_LINK_CANDIDATES),
+          cache: { hit: false }
         };
+        writeSourceCache({
+          runtimeRoot: options.runtimeRoot,
+          url: candidate.url,
+          value: result
+        });
+        return result;
       }
     } catch {
       // Try the next URL form.
@@ -937,6 +958,9 @@ function shouldRunFallbackForSparseSelection(selected, attemptedProviders, prima
 }
 
 async function collectSearchResults(options, log = () => {}) {
+  if (options.runtimeRoot) {
+    pruneSourceCache(options.runtimeRoot);
+  }
   const primary = String(options.primaryProvider || "naver").toLowerCase();
   const fallback = String(options.fallbackProvider || "google").toLowerCase();
   const providers = [primary, fallback];
@@ -1000,7 +1024,7 @@ async function collectSearchResults(options, log = () => {}) {
       items,
       CONTENT_FETCH_CONCURRENCY,
       async (candidate) => {
-        const result = await fetchCandidateContent(candidate);
+        const result = await fetchCandidateContent(candidate, options);
         completed += 1;
         if (completed === 1 || completed % 2 === 0 || completed === items.length) {
           log(`본문 추출 진행: ${completed}/${items.length}`);
@@ -1009,6 +1033,10 @@ async function collectSearchResults(options, log = () => {}) {
       }
     );
     const validEnriched = enriched.filter(Boolean);
+    const cacheHits = validEnriched.filter((item) => item?.cache?.hit === true).length;
+    if (cacheHits > 0) {
+      log(`본문 캐시 재사용: ${cacheHits}/${validEnriched.length}개`);
+    }
     const withContent = validEnriched.filter((item) => String(item.excerpt || "").trim().length >= 80);
     if (!withContent.length) return { selected: [], withContent: [] };
     const commonTokens = selectCommonTokens(withContent, options);
