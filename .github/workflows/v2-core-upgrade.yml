@@ -58,10 +58,37 @@ jobs:
           node --check src/lib/partialRepair.js
           node --check src/lib/titleNovelty.js
 
-      - name: Syntax check generated Codex runner
-        run: node --check src/lib/codexRunner.js
+      - name: Diagnose generated Codex runner syntax
+        id: runner_syntax
+        shell: bash
+        run: |
+          rm -f v2-syntax-diagnostic.txt
+          if node --check src/lib/codexRunner.js 2>v2-syntax-diagnostic.txt; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            rm -f v2-syntax-diagnostic.txt
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            printf '\n--- early-title region ---\n' >> v2-syntax-diagnostic.txt
+            grep -n -A45 -B12 "earlyTitleNovelty" src/lib/codexRunner.js >> v2-syntax-diagnostic.txt || true
+          fi
+
+      - name: Commit syntax diagnostic
+        if: steps.runner_syntax.outputs.ok == 'false'
+        shell: bash
+        run: |
+          git checkout -- src/lib/codexRunner.js src/lib/naverPublisher.js src/lib/settings.js src/main.js src/renderer/index.html src/renderer/app.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add v2-syntax-diagnostic.txt
+          git commit -m "chore: capture V2 runner syntax diagnostic"
+          git push origin HEAD:upgrade/best-of-v2
+
+      - name: Require generated Codex runner syntax
+        if: steps.runner_syntax.outputs.ok == 'false'
+        run: exit 1
 
       - name: Syntax check publishing integration
+        if: steps.runner_syntax.outputs.ok == 'true'
         run: |
           node --check src/lib/naverPublisher.js
           node --check src/lib/settings.js
@@ -69,14 +96,17 @@ jobs:
           node --check src/renderer/app.js
 
       - name: Run V2 regression checks
+        if: steps.runner_syntax.outputs.ok == 'true'
         run: |
           node scripts/check-v2.js
           node scripts/check-v2-early-title-gate.js
 
       - name: Run repository checks
+        if: steps.runner_syntax.outputs.ok == 'true'
         run: npm run check
 
       - name: Commit generated V2 integration
+        if: steps.runner_syntax.outputs.ok == 'true'
         shell: bash
         run: |
           if git diff --quiet; then
