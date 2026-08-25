@@ -58,9 +58,26 @@ jobs:
         run: node scripts/check-v2.js
 
       - name: Run repository checks
-        run: npm run check
+        id: legacy-check
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee v2-ci-check.log
+
+      - name: Preserve compatibility failure log
+        if: steps.legacy-check.outcome == 'failure'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add v2-ci-check.log
+          git commit -m "ci: capture V2 legacy compatibility failure"
+          git push origin HEAD:upgrade/best-of-v2
+          exit 1
 
       - name: Commit generated V2 integration
+        if: steps.legacy-check.outcome == 'success'
         shell: bash
         run: |
           if git diff --quiet; then
