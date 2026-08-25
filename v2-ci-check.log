@@ -1,0 +1,5 @@
+
+> blogauto-naver-tistory@0.1.0 check
+> node scripts/check.js
+
+src/main.js: CODEX_USAGE_LIMIT must map to codex_usage_limit job status
