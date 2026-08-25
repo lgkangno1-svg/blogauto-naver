@@ -18,8 +18,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
-  issues: write
 
 jobs:
   upgrade:
@@ -60,30 +58,9 @@ jobs:
         run: node scripts/check-v2.js
 
       - name: Run repository checks
-        id: legacy-check
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check 2>&1 | tee v2-ci-check.log
-
-      - name: Report compatibility failure
-        if: steps.legacy-check.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          {
-            echo '### V2 compatibility check failure'
-            echo '```text'
-            tail -n 80 v2-ci-check.log
-            echo '```'
-          } > v2-pr-diagnostic.md
-          gh pr comment 1 --body-file v2-pr-diagnostic.md
-          exit 1
+        run: npm run check
 
       - name: Commit generated V2 integration
-        if: steps.legacy-check.outcome == 'success'
         shell: bash
         run: |
           if git diff --quiet; then
