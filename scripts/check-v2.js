@@ -2,6 +2,13 @@ const assert = require("node:assert/strict");
 const { evaluateArticleQuality } = require("../src/lib/qualityGate");
 const { adaptiveEffort, tokenSavings } = require("../src/lib/tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("../src/lib/evidenceLedger");
+const {
+  normalizeComparableText,
+  titleVerificationNeedle,
+  publishOutcomeUncertainError,
+  publishStatusFromError,
+  shouldAutoRetryStatus
+} = require("../src/lib/publishSafety");
 
 function base(overrides = {}) {
   return {
@@ -76,6 +83,18 @@ function base(overrides = {}) {
   assert.equal(compact.finalTitle, "테스트 제목");
   assert.ok(compact.confirmedFacts.length <= 12);
   assert.equal(compact.ignoredHugeField, undefined);
+}
+
+{
+  assert.equal(normalizeComparableText("  통신비, 줄이기! "), "통신비줄이기");
+  assert.ok(titleVerificationNeedle("통신비 줄이기 전에 확인할 조건").startsWith("통신비줄이기"));
+  const uncertain = publishOutcomeUncertainError(new Error("완료 확인 timeout"), { blogId: "test" });
+  assert.equal(uncertain.code, "NAVER_PUBLISH_UNCERTAIN");
+  assert.equal(uncertain.failurePhase, "publish_verify");
+  assert.equal(uncertain.commitBoundaryCrossed, true);
+  assert.equal(publishStatusFromError(uncertain), "publish_uncertain");
+  assert.equal(shouldAutoRetryStatus("publish_uncertain"), false);
+  assert.equal(shouldAutoRetryStatus("failed"), true);
 }
 
 assert.equal(adaptiveEffort({ tokenEfficiencyMode: "balanced", topic: "주방세제 비교" }, "main", "high"), "medium");
