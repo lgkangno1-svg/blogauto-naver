@@ -3,6 +3,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { evaluateArticleQuality } = require("./qualityGate");
+const { evaluateTitleNovelty } = require("./titleNovelty");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
 const { planPartialRepair, buildPartialRepairPrompt, mergePartialRepairResult, partialRepairEffort } = require("./partialRepair");
@@ -2440,6 +2441,40 @@ async function runCodexGeneration(options, log = () => {}) {
       titleImagePath: "",
       notes: Array.isArray(researchResult.notes) ? researchResult.notes : [],
       researchTitleResult: researchResult,
+      tokenUsage: tokenUsageSnapshot()
+    };
+  }
+
+  const earlyTitleNovelty = evaluateTitleNovelty(finalTitle, effectiveOptions.historyTitles || [], {
+    maxTitleSimilarity: 0.72
+  });
+  if (!earlyTitleNovelty.pass) {
+    const duplicateReason = earlyTitleNovelty.reason || "최근 제목과 지나치게 유사한 제목이 선택되었습니다.";
+    log(
+      "Research/Title Agent 조기 중복 차단: " + duplicateReason + " Writer/Main/Image 호출을 생략합니다.",
+      "warn",
+      "research"
+    );
+    return {
+      status: "failed",
+      failurePhase: "duplicate",
+      failureReason: duplicateReason,
+      title: "",
+      article: "",
+      tags: [],
+      bodyImages: [],
+      titleImagePath: "",
+      notes: compactTextList([
+        duplicateReason,
+        earlyTitleNovelty.closestTitle
+          ? "가장 유사한 최근 제목: " + earlyTitleNovelty.closestTitle
+          : ""
+      ]),
+      researchTitleResult: researchResult,
+      optimization: {
+        earlyExit: "duplicate_title",
+        skippedStages: ["writer_contract", "writer", "main_review", "image"]
+      },
       tokenUsage: tokenUsageSnapshot()
     };
   }
