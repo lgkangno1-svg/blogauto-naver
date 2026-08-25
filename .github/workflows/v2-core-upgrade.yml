@@ -98,7 +98,13 @@ jobs:
 
       - name: Apply per-job token diagnostics and verify
         run: |
-          node scripts/apply-v2-job-diagnostics.js
+          if grep -q 'jobTokenUsage.diagnostics' src/main.js \
+            && grep -q 'id="tokenDiagnosticsSummary"' src/renderer/index.html \
+            && grep -q 'function renderJobDiagnostics' src/renderer/app.js; then
+            echo "Per-job token diagnostics already integrated"
+          else
+            node scripts/apply-v2-job-diagnostics.js
+          fi
           node --check src/lib/jobDiagnostics.js
           node --check src/main.js
           node --check src/renderer/app.js
