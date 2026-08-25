@@ -11,6 +11,7 @@ const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunn
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession, verifyOpenNaverSession } = require("./lib/naverPublisher");
 const { publishStatusFromError } = require("./lib/publishSafety");
+const { buildJobTokenDiagnostics } = require("./lib/jobDiagnostics");
 const { publishToTistory, checkTistorySession } = require("./lib/tistoryPublisher");
 const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, resolveCodexCmdPath, readSettings, writeSettings } = require("./lib/settings");
 const {
@@ -1150,6 +1151,9 @@ async function startJob(form) {
     inputTokens: 0,
     cachedInputTokens: 0,
     outputTokens: 0,
+    agents: {},
+    grossAgents: {},
+    diagnostics: buildJobTokenDiagnostics({}),
     rateLimits: null
   };
   writeSettings(runtimeRoot, {
@@ -1460,6 +1464,18 @@ async function startJob(form) {
           if (usage.rateLimits) {
             jobTokenUsage.rateLimits = usage.rateLimits;
           }
+          const usageAgent = String(usage.agent || "").trim();
+          if (usageAgent) {
+            const agentTotal = Number(usage.agentTotal || 0);
+            if (Number.isFinite(agentTotal) && agentTotal >= 0) {
+              jobTokenUsage.agents[usageAgent] = agentTotal;
+            }
+            const grossDelta = Math.max(0, Number(usage.agentGrossDelta || 0));
+            if (grossDelta) {
+              jobTokenUsage.grossAgents[usageAgent] = Number(jobTokenUsage.grossAgents[usageAgent] || 0) + grossDelta;
+            }
+          }
+          jobTokenUsage.diagnostics = buildJobTokenDiagnostics(jobTokenUsage);
           emit("job:tokens", {
             jobId,
             total: jobTokenUsage.total,
@@ -1472,6 +1488,9 @@ async function startJob(form) {
             agentTotal: Number(usage.agentTotal || 0),
             agentDelta: Number(usage.agentDelta || 0),
             agentGrossDelta: Number(usage.agentGrossDelta || 0),
+            agents: { ...jobTokenUsage.agents },
+            grossAgents: { ...jobTokenUsage.grossAgents },
+            diagnostics: jobTokenUsage.diagnostics,
             final: usage.final === true,
             at: new Date().toISOString()
           });
@@ -1566,6 +1585,13 @@ async function startJob(form) {
     if (codexResult.tokenUsage?.rateLimits) {
       jobTokenUsage.rateLimits = codexResult.tokenUsage.rateLimits;
     }
+    if (codexResult.tokenUsage?.agents && typeof codexResult.tokenUsage.agents === "object") {
+      jobTokenUsage.agents = { ...codexResult.tokenUsage.agents };
+    }
+    if (codexResult.tokenUsage?.grossAgents && typeof codexResult.tokenUsage.grossAgents === "object") {
+      jobTokenUsage.grossAgents = { ...codexResult.tokenUsage.grossAgents };
+    }
+    jobTokenUsage.diagnostics = buildJobTokenDiagnostics(jobTokenUsage);
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
     const sourceFailureReason = detectCodexSourceFailure(codexResult);
     if (sourceFailureReason) {
