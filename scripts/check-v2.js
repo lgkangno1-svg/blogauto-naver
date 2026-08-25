@@ -3,6 +3,12 @@ const { evaluateArticleQuality } = require("../src/lib/qualityGate");
 const { adaptiveEffort, tokenSavings } = require("../src/lib/tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("../src/lib/evidenceLedger");
 const {
+  planPartialRepair,
+  buildPartialRepairPrompt,
+  mergePartialRepairResult,
+  partialRepairEffort
+} = require("../src/lib/partialRepair");
+const {
   normalizeComparableText,
   titleVerificationNeedle,
   publishOutcomeUncertainError,
@@ -95,6 +101,75 @@ function base(overrides = {}) {
   assert.equal(publishStatusFromError(uncertain), "publish_uncertain");
   assert.equal(shouldAutoRetryStatus("publish_uncertain"), false);
   assert.equal(shouldAutoRetryStatus("failed"), true);
+}
+
+{
+  const quality = {
+    pass: false,
+    repairScope: "targeted",
+    issues: [
+      { code: "fabricated_experience", message: "직접 사용 표현 제거" },
+      { code: "ai_phrase", message: "AI 상투어 수정" }
+    ]
+  };
+  const plan = planPartialRepair(quality);
+  assert.equal(plan.eligible, true);
+  assert.deepEqual(plan.issueCodes, ["fabricated_experience", "ai_phrase"]);
+  const prompt = buildPartialRepairPrompt({
+    writerResult: {
+      title: "통신비 줄이기 전에 확인할 조건",
+      article: "제가 직접 써보니 좋았습니다. 알아보겠습니다.",
+      tags: ["통신비"]
+    },
+    deterministicQuality: quality,
+    topic: "통신비 절약",
+    keyword: "통신비",
+    searchResults: [{
+      title: "공식 안내",
+      excerpt: "요금제는 약정과 데이터 사용량을 함께 확인한다.",
+      relevance: { score: 10, officialSource: true }
+    }],
+    resultPath: "C:/job/writer-partial-repair-1-result.json"
+  });
+  assert.ok(prompt.includes("This is NOT a full rewrite"));
+  assert.ok(prompt.includes("C:/job/writer-partial-repair-1-result.json"));
+  assert.ok(prompt.includes("Compact evidence ledger"));
+  assert.ok(prompt.length < 7000);
+
+  const merged = mergePartialRepairResult({
+    title: "원래 제목",
+    article: "원래 본문",
+    tags: ["기존태그"]
+  }, {
+    status: "success",
+    title: "바꾸려는 제목",
+    article: "수정된 본문",
+    tags: ["바꾸려는태그"]
+  });
+  assert.equal(merged.title, "원래 제목");
+  assert.equal(merged.article, "수정된 본문");
+  assert.deepEqual(merged.tags, ["기존태그"]);
+  assert.equal(merged.partialRepairApplied, true);
+  assert.equal(partialRepairEffort("balanced"), "low");
+  assert.equal(partialRepairEffort("quality"), "medium");
+}
+
+{
+  const duplicatePlan = planPartialRepair({
+    pass: false,
+    repairScope: "title",
+    issues: [{ code: "duplicate_title", message: "제목 중복" }]
+  });
+  assert.equal(duplicatePlan.eligible, false);
+  assert.ok(duplicatePlan.reason.startsWith("unsupported_scope:"));
+
+  const fullPlan = planPartialRepair({
+    pass: false,
+    repairScope: "full",
+    issues: [{ code: "article_too_short", message: "본문이 짧음" }]
+  });
+  assert.equal(fullPlan.eligible, false);
+  assert.equal(fullPlan.reason, "full_rewrite_required");
 }
 
 assert.equal(adaptiveEffort({ tokenEfficiencyMode: "balanced", topic: "주방세제 비교" }, "main", "high"), "medium");
