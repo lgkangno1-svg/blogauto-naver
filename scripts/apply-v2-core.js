@@ -22,17 +22,21 @@ function replaceAllExact(from, to, label) {
   changed = true;
 }
 
-replaceOnce(
-  'const { spawn } = require("node:child_process");\n',
-  'const { spawn } = require("node:child_process");\nconst { evaluateArticleQuality } = require("./qualityGate");\nconst { adaptiveEffort, tokenSavings } = require("./tokenPolicy");\n',
-  "imports"
-);
+function ensureRequire(requireLine) {
+  if (source.includes(requireLine)) return;
+  const spawnLine = 'const { spawn } = require("node:child_process");';
+  if (!source.includes(spawnLine)) {
+    throw new Error(`V2 patch anchor not found while adding import: ${requireLine}`);
+  }
+  source = source.replace(spawnLine, `${spawnLine}\n${requireLine}`);
+  changed = true;
+}
 
-replaceOnce(
-  'const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");\n',
-  'const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");\nconst { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");\n',
-  "evidence ledger import"
-);
+// Imports must be checked independently. Other V2 modules may be inserted between
+// them, so relying on one exact multi-line import block is not rerun-safe.
+ensureRequire('const { evaluateArticleQuality } = require("./qualityGate");');
+ensureRequire('const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");');
+ensureRequire('const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");');
 
 replaceOnce(
   '  let taskEffort = modelEffortForAgent(options, agent);',
@@ -77,6 +81,7 @@ replaceAllExact(
 );
 
 const deterministicGateAlreadyIntegrated = source.includes("let deterministicQuality = evaluateArticleQuality({")
+  || source.includes("const deterministicQuality = evaluateArticleQuality({")
   || source.includes("Writer 부분 수정 시작:");
 if (!deterministicGateAlreadyIntegrated) {
   replaceOnce(
