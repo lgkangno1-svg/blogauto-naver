@@ -57,7 +57,7 @@ patchFile("src/main.js", [
   {
     label: "general publish error classification",
     from: `    const failedStatus = error.code === "SESSION_EXPIRED"\n      ? "session_expired"\n      : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"\n        : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"\n          : "failed";`,
-    to: `    const failedStatus = publishStatusFromError(error);`
+    to: `    const failedStatus = error.code === "NAVER_PUBLISH_UNCERTAIN"\n      ? "publish_uncertain"\n      : error.code === "SESSION_EXPIRED"\n        ? "session_expired"\n        : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"\n          : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"\n            : "failed";`
   }
 ]);
 
