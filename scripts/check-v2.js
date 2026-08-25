@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { evaluateArticleQuality } = require("../src/lib/qualityGate");
 const { adaptiveEffort, tokenSavings } = require("../src/lib/tokenPolicy");
+const { buildEvidenceLedger, compactResearchHandoff } = require("../src/lib/evidenceLedger");
 
 function base(overrides = {}) {
   return {
@@ -45,6 +46,36 @@ function base(overrides = {}) {
   const title = "통신비 줄이기 전에 확인할 조건";
   const result = evaluateArticleQuality(base({ title, historyTitles: [title] }));
   assert.ok(result.issues.some((item) => item.code === "duplicate_title"));
+}
+
+{
+  const longExcerpt = [
+    "통신비 요금제는 데이터 사용량과 약정 조건을 함께 비교해야 합니다.",
+    "공식 안내에는 월 3만원 조건이 표시되어 있습니다.",
+    "관련 없는 매우 긴 배경 설명입니다. ".repeat(80)
+  ].join(" ");
+  const ledger = buildEvidenceLedger([{ title: "공식 요금 안내", excerpt: longExcerpt, relevance: { score: 10, officialSource: true } }], {
+    topic: "통신비 요금제 비교",
+    keyword: "통신비",
+    maxEvidenceChars: 300
+  });
+  assert.equal(ledger.sourceCount, 1);
+  assert.equal(ledger.sources[0].sourceType, "official");
+  assert.ok(JSON.stringify(ledger).length < longExcerpt.length);
+  assert.ok(ledger.sources[0].facts.join(" ").includes("통신비"));
+}
+
+{
+  const compact = compactResearchHandoff({
+    status: "PASS",
+    finalTitle: "테스트 제목",
+    confirmedFacts: Array.from({ length: 30 }, (_, i) => `사실 ${i}`),
+    uncertainItems: ["변동 가능"],
+    ignoredHugeField: "x".repeat(10000)
+  });
+  assert.equal(compact.finalTitle, "테스트 제목");
+  assert.ok(compact.confirmedFacts.length <= 12);
+  assert.equal(compact.ignoredHugeField, undefined);
 }
 
 assert.equal(adaptiveEffort({ tokenEfficiencyMode: "balanced", topic: "주방세제 비교" }, "main", "high"), "medium");
