@@ -18,6 +18,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: write
 
 jobs:
   upgrade:
@@ -65,15 +67,19 @@ jobs:
           set -o pipefail
           npm run check 2>&1 | tee v2-ci-check.log
 
-      - name: Preserve compatibility failure log
+      - name: Report compatibility failure
         if: steps.legacy-check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f v2-ci-check.log
-          git commit -m "ci: capture V2 legacy compatibility failure"
-          git push origin HEAD:upgrade/best-of-v2
+          {
+            echo '### V2 compatibility check failure'
+            echo '```text'
+            tail -n 80 v2-ci-check.log
+            echo '```'
+          } > v2-pr-diagnostic.md
+          gh pr comment 1 --body-file v2-pr-diagnostic.md
           exit 1
 
       - name: Commit generated V2 integration
