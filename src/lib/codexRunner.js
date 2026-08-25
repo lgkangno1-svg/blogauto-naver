@@ -4,6 +4,7 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { evaluateArticleQuality } = require("./qualityGate");
 const { evaluateTitleNovelty } = require("./titleNovelty");
+const { shouldRefineWriterContract } = require("./contractPolicy");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
 const { planPartialRepair, buildPartialRepairPrompt, mergePartialRepairResult, partialRepairEffort } = require("./partialRepair");
@@ -2525,7 +2526,44 @@ async function runCodexGeneration(options, log = () => {}) {
     return { ok: true, result: contractResult };
   };
 
-  const initialContractRefinement = await refineWriterContract();
+  const contractRefinementPolicy = shouldRefineWriterContract({
+    topic: effectiveOptions.topic,
+    finalTitle,
+    topicMode: effectiveOptions.topicMode,
+    tokenMode: effectiveOptions.tokenMode,
+    researchResult,
+    sourceQuality: effectiveOptions.sourceQuality
+  });
+  let initialContractRefinement = { ok: true, skipped: true, policy: contractRefinementPolicy };
+  if (contractRefinementPolicy.refine) {
+    log(
+      `Main Agent Writer Contract 정밀 검수 유지: ${contractRefinementPolicy.reasons.join(", ")}`,
+      "info",
+      "main"
+    );
+    initialContractRefinement = await refineWriterContract();
+  } else {
+    const draftWriterContract = buildWriterContract(researchResult, {
+      topic: finalTitle || effectiveOptions.topic,
+      finalTitle,
+      preferredTone: effectiveOptions.preferredTone || ""
+    });
+    researchResult = {
+      ...researchResult,
+      writerContract: draftWriterContract,
+      writerContractRefined: false,
+      writerContractPolicy: contractRefinementPolicy,
+      notes: compactTextList([
+        researchResult.notes,
+        "토큰 최적화: 안정적인 일반 글이라 별도 Main Agent Writer Contract 호출을 생략했습니다."
+      ])
+    };
+    log(
+      "토큰 최적화: 안정적인 일반 글이라 Main Agent Writer Contract 호출을 생략합니다.",
+      "info",
+      "main"
+    );
+  }
   if (!initialContractRefinement.ok) {
     return {
       status: "failed",
