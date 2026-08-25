@@ -35,6 +35,10 @@ on:
       - "scripts/check-v2-adaptive-reasoning.js"
       - ".github/workflows/v2-core-upgrade.yml"
 
+concurrency:
+  group: v2-core-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
