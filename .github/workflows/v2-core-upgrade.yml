@@ -9,6 +9,7 @@ on:
       - "src/lib/qualityGate.js"
       - "src/lib/tokenPolicy.js"
       - "scripts/apply-v2-core.js"
+      - "scripts/check-v2.js"
       - ".github/workflows/v2-core-upgrade.yml"
 
 permissions:
@@ -39,6 +40,9 @@ jobs:
           node --check src/lib/qualityGate.js
           node --check src/lib/tokenPolicy.js
           node --check src/lib/codexRunner.js
+
+      - name: Run V2 regression checks
+        run: node scripts/check-v2.js
 
       - name: Run repository checks
         run: npm run check
