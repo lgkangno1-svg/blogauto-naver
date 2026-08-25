@@ -4,6 +4,7 @@ const os = require("node:os");
 const { spawn } = require("node:child_process");
 const { evaluateArticleQuality } = require("./qualityGate");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
+const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
 
 const DEFAULT_AGENT_MODELS = {
   main: "high",
@@ -780,12 +781,14 @@ function buildPrompt({
     researchSearchNeed === "skip"
       ? "Research/Title Agent judged that external search can be skipped. Use the Writer Contract as the writing boundary, avoid current/date-bound claims, and do not invent specific facts."
       : "Use the extracted source candidates below as the factual basis. Each candidate may include title, url, fetchedUrl, excerpt, contentLength, and relevance.",
-    JSON.stringify(compactSearchResultsForPrompt(searchResults, {
-      maxResults: 8,
-      excerptChars: 700
+    JSON.stringify(buildEvidenceLedger(searchResults, {
+      topic,
+      keyword,
+      maxSources: 8,
+      maxEvidenceChars: 360
     }), null, 2),
-    researchTitleResult ? "Full Research/Title handoff for factual support only:" : "",
-    researchTitleResult ? JSON.stringify(researchTitleResult, null, 2) : "",
+    researchTitleResult ? "Compact Research/Title handoff for factual support only:" : "",
+    researchTitleResult ? JSON.stringify(compactResearchHandoff(researchTitleResult), null, 2) : "",
     "",
     "Source quality summary:",
     JSON.stringify(sourceQuality || { status: "unknown" }, null, 2),
@@ -797,7 +800,7 @@ function buildPrompt({
     "- Failure is a normal valid output. If you cannot support the post from extracted excerpts, you must set status to \"failed\". Do not try to be helpful by writing a caveat-filled article.",
     "",
     "Existing titles for duplicate awareness:",
-    JSON.stringify(historyTitles.slice(0, 80), null, 2),
+    JSON.stringify(historyTitles.slice(0, 30), null, 2),
     "",
     "Required output:",
     "- Write a JSON file at the exact Output JSON path.",
@@ -1097,7 +1100,7 @@ function buildMainReviewPrompt({
     "- Return BLOCK if facts are insufficient, sources conflict, official/current evidence is missing, the article is unsupported, the direct topic changed, or publishing could mislead readers.",
     "",
     "Research/Title Agent result:",
-    JSON.stringify(researchTitleResult || {}, null, 2),
+    JSON.stringify(compactResearchHandoff(researchTitleResult || {}), null, 2),
     "",
     "Writer Agent result:",
     JSON.stringify(writerResult || {}, null, 2),
@@ -1146,7 +1149,7 @@ function buildWriterContractRefinementPrompt({
     JSON.stringify(draftWriterContract || {}, null, 2),
     "",
     "Research/Title Agent result:",
-    JSON.stringify(researchTitleResult || {}, null, 2),
+    JSON.stringify(compactResearchHandoff(researchTitleResult || {}), null, 2),
     "",
     "Source quality summary:",
     JSON.stringify(sourceQuality || { status: "unknown" }, null, 2),
