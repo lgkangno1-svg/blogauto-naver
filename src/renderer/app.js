@@ -588,6 +588,32 @@ async function refreshCodexUsageOnStartup() {
   }
 }
 
+function renderTokenHistoryBaseline(history = []) {
+  const target = $("#tokenHistoryBaseline");
+  if (!target) return;
+  const rows = (Array.isArray(history) ? history : [])
+    .filter((item) => Number(item?.token_total || 0) > 0)
+    .slice(0, 20);
+  if (!rows.length) {
+    target.innerHTML = '<span class="hint">최근 작업 토큰 기준선은 작업 이력에 쌓인 뒤 표시됩니다.</span>';
+    return;
+  }
+  const average = Math.round(rows.reduce((sum, item) => sum + Number(item.token_total || 0), 0) / rows.length);
+  const gross = Math.round(rows.reduce((sum, item) => sum + Math.max(Number(item.token_total || 0), Number(item.token_gross_total || 0)), 0) / rows.length);
+  const saved = Math.round(rows.reduce((sum, item) => sum + Number(item.token_saved || 0), 0) / rows.length);
+  const savings = gross > 0 ? Math.round((saved / gross) * 1000) / 10 : 0;
+  const latest = Number(rows[0]?.token_total || 0);
+  const previous = rows.slice(1);
+  const previousAverage = previous.length
+    ? Math.round(previous.reduce((sum, item) => sum + Number(item.token_total || 0), 0) / previous.length)
+    : 0;
+  const delta = previousAverage > 0 ? Math.round(((latest - previousAverage) / previousAverage) * 1000) / 10 : 0;
+  const anomaly = previous.length >= 3 && delta >= 50;
+  const largestAgent = rows.map((item) => String(item.token_largest_agent || "")).find(Boolean) || "-";
+  target.innerHTML = `<div><strong>최근 ${rows.length}건 평균 ${average.toLocaleString()} tokens</strong> · 평균 절감 ${saved.toLocaleString()} (${savings}%) · 최근 최대 Agent ${escapeHtml(largestAgent)}</div>`
+    + (previousAverage ? `<div class="${anomaly ? "note warn" : "hint"}">최근 작업은 이전 평균 대비 ${delta >= 0 ? "+" : ""}${delta}%${anomaly ? " — 토큰 급증 확인 필요" : ""}</div>` : "");
+}
+
 function renderHistory(history) {
   const body = $("#historyBody");
   const summary = $("#historySummary");
@@ -596,6 +622,7 @@ function renderHistory(history) {
 
   if (modal) modal.hidden = !state.historyModalOpen;
   if (summary) summary.innerHTML = renderHistorySummary(items);
+  renderTokenHistoryBaseline(items);
 
   body.innerHTML = "";
   if (items.length === 0) {
@@ -621,6 +648,9 @@ function renderHistory(history) {
       ["검색어", item.search_query || item.query],
       ["Research 제목", item.research_title],
       ["검토 결과", item.final_verdict],
+      ["토큰 총사용", item.token_gross_total ? formatTokens(item.token_gross_total) : ""],
+      ["토큰 절감", item.token_saved ? `${formatTokens(item.token_saved)} (${Number(item.token_savings_percent || 0)}%)` : ""],
+      ["최대 사용 Agent", item.token_largest_agent],
       ["실패 단계", item.failure_phase],
       ["근거 요약", item.source_summary],
       ["사유", item.reason]
@@ -1747,7 +1777,7 @@ async function boot() {
     $("#articlePreview").value = payload.article || $("#articlePreview").value;
     $("#articleMeta").textContent = payload.title || payload.status || "완료";
     if (payload.title) $("#selectedTitle").textContent = payload.title;
-    if (payload.tokenUsage) setTokenTotal(payload.tokenUsage.total || 0);
+    if (payload.tokenUsage) setTokenUsage(payload.tokenUsage);
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
     renderImageNotes(payload.imageNotes || []);

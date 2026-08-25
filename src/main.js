@@ -11,7 +11,7 @@ const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunn
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession, verifyOpenNaverSession } = require("./lib/naverPublisher");
 const { publishStatusFromError } = require("./lib/publishSafety");
-const { buildJobTokenDiagnostics } = require("./lib/jobDiagnostics");
+const { buildJobTokenDiagnostics, historyTokenFields } = require("./lib/jobDiagnostics");
 const { publishToTistory, checkTistorySession } = require("./lib/tistoryPublisher");
 const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, resolveCodexCmdPath, readSettings, writeSettings } = require("./lib/settings");
 const {
@@ -1645,7 +1645,7 @@ async function startJob(form) {
         research_title: researchTitleResult.finalTitle || researchTitleResult.selectedTitle || "",
         embedding_model: "local-hash-v1",
         embedding,
-        token_total: jobTokenUsage.total,
+        ...historyTokenFields(jobTokenUsage),
         reason: `기존 제목과 cosine similarity ${maxSimilarity.toFixed(3)}`
       };
       appendHistory(runtimeRoot, duplicateEntry);
@@ -1778,7 +1778,7 @@ async function startJob(form) {
       source_summary: researchTitleResult.searchFlowSummary || "",
       embedding_model: "local-hash-v1",
       embedding,
-      token_total: jobTokenUsage.total,
+      ...historyTokenFields(jobTokenUsage),
       reason: publishReason
     };
     appendHistory(runtimeRoot, entry);
@@ -1849,7 +1849,7 @@ async function startJob(form) {
       status: failedStatus,
       embedding_model: "local-hash-v1",
       embedding,
-      token_total: jobTokenUsage.total,
+      ...historyTokenFields(jobTokenUsage),
       failure_phase: error.failurePhase || "",
       research_title: latestResearchTitleResult?.finalTitle || latestResearchTitleResult?.selectedTitle || "",
       reason: error.message
