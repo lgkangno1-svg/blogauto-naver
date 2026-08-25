@@ -13,15 +13,18 @@ on:
       - "src/lib/partialRepair.js"
       - "src/lib/titleNovelty.js"
       - "src/lib/sourceCache.js"
+      - "src/lib/contractPolicy.js"
       - "scripts/apply-v2-core.js"
       - "scripts/apply-v2-ui.js"
       - "scripts/apply-v2-publish-safety.js"
       - "scripts/apply-v2-partial-repair.js"
       - "scripts/apply-v2-early-title-gate.js"
       - "scripts/apply-v2-source-cache.js"
+      - "scripts/apply-v2-adaptive-contract.js"
       - "scripts/check-v2.js"
       - "scripts/check-v2-early-title-gate.js"
       - "scripts/check-v2-source-cache.js"
+      - "scripts/check-v2-adaptive-contract.js"
       - ".github/workflows/v2-core-upgrade.yml"
 
 permissions:
@@ -72,6 +75,12 @@ jobs:
           node scripts/apply-v2-early-title-gate.js
           node --check src/lib/codexRunner.js
 
+      - name: Apply adaptive Writer Contract policy and verify
+        run: |
+          node scripts/apply-v2-adaptive-contract.js
+          node --check src/lib/contractPolicy.js
+          node --check src/lib/codexRunner.js
+
       - name: Apply freshness-aware source cache and verify
         run: |
           node scripts/apply-v2-source-cache.js
@@ -88,12 +97,14 @@ jobs:
           node --check src/lib/partialRepair.js
           node --check src/lib/titleNovelty.js
           node --check src/lib/sourceCache.js
+          node --check src/lib/contractPolicy.js
 
       - name: Run V2 regression checks
         run: |
           node scripts/check-v2.js
           node scripts/check-v2-early-title-gate.js
           node scripts/check-v2-source-cache.js
+          node scripts/check-v2-adaptive-contract.js
 
       - name: Run repository checks
         run: npm run check
@@ -108,5 +119,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/codexRunner.js src/lib/naverPublisher.js src/lib/settings.js src/lib/search.js src/main.js src/renderer/index.html src/renderer/app.js
-          git commit -m "feat: integrate V2 evidence quality token UI publish safety partial repair duplicate gate and source cache"
+          git commit -m "feat: integrate V2 evidence quality token UI publish safety partial repair duplicate gate cache and adaptive contract"
           git push origin HEAD:upgrade/best-of-v2
