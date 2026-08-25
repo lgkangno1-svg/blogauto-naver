@@ -79,6 +79,39 @@ function base(overrides = {}) {
 }
 
 {
+  // Evidence must be authority-first even when the raw result list starts with UGC,
+  // and duplicate URLs must not spend prompt budget twice.
+  const ledger = buildEvidenceLedger([
+    {
+      title: "개인 블로그 요약",
+      url: "https://blog.example/post",
+      excerpt: "통신비 관련 개인 의견입니다.",
+      relevance: { score: 14, lowTrustSource: true }
+    },
+    {
+      title: "공식 통신비 안내",
+      url: "https://gov.example/guide",
+      excerpt: "통신비 할인 대상과 신청 조건을 공식 안내합니다. 월 3만원 조건은 대상별로 다릅니다.",
+      relevance: { score: 8, officialSource: true, strictEvidence: true, currentFactSignal: true }
+    },
+    {
+      title: "공식 통신비 안내 복제 결과",
+      fetchedUrl: "https://gov.example/guide",
+      excerpt: "같은 페이지가 검색 공급자에서 중복 수집됐습니다.",
+      relevance: { score: 7, officialSource: true }
+    }
+  ], {
+    topic: "통신비 할인 신청 조건",
+    maxSources: 2,
+    maxTotalEvidenceChars: 500
+  });
+  assert.equal(ledger.sources[0].sourceType, "official");
+  assert.equal(ledger.candidateCount, 2);
+  assert.ok(ledger.evidenceChars <= 500);
+  assert.equal(ledger.sources.filter((item) => item.url === "https://gov.example/guide").length, 1);
+}
+
+{
   const compact = compactResearchHandoff({
     status: "PASS",
     finalTitle: "테스트 제목",
@@ -89,6 +122,37 @@ function base(overrides = {}) {
   assert.equal(compact.finalTitle, "테스트 제목");
   assert.ok(compact.confirmedFacts.length <= 12);
   assert.equal(compact.ignoredHugeField, undefined);
+}
+
+{
+  // The Writer Contract is already emitted separately by buildPrompt. The support
+  // handoff must not duplicate it, and usableSources must not carry full excerpts.
+  const hugeExcerpt = "원문 본문 ".repeat(1200);
+  const contract = {
+    selectedTitle: "통신비 절약 전 확인할 조건",
+    mustAnswer: ["약정 조건", "데이터 사용량"],
+    safetyBoundaries: ["근거 없는 금액 단정 금지"]
+  };
+  const compact = compactResearchHandoff({
+    status: "PASS",
+    searchNeed: "normal",
+    finalTitle: "통신비 절약 전 확인할 조건",
+    writerContract: contract,
+    usableSources: [{
+      sourceId: "S1",
+      title: "공식 안내",
+      url: "https://gov.example/guide",
+      excerpt: hugeExcerpt,
+      nested: { body: hugeExcerpt }
+    }],
+    confirmedFacts: [{ claim: "대상별 조건 확인", evidence: hugeExcerpt }]
+  });
+  assert.equal(compact.writerContract, undefined);
+  assert.equal(compact.usableSources[0].excerpt, undefined);
+  assert.ok(JSON.stringify(compact).length < 2500);
+
+  const withContract = compactResearchHandoff({ writerContract: contract }, { includeWriterContract: true });
+  assert.ok(withContract.writerContract);
 }
 
 {
