@@ -127,6 +127,7 @@ function setRunState(status, detail = "") {
     codex_usage_limit: "danger",
     codex_exec_failed: "danger",
     session_expired: "danger",
+    publish_uncertain: "warning",
     duplicate_retry: "warning",
     publishing: "info",
     generating: "info"
@@ -138,6 +139,7 @@ function setRunState(status, detail = "") {
     codex_usage_limit: "한도초과",
     codex_exec_failed: "Codex실패",
     session_expired: "세션만료",
+    publish_uncertain: "발행확인필요",
     duplicate_retry: "중복",
     publishing: "발행",
     generating: "생성중"
@@ -170,7 +172,7 @@ function addLog(payload) {
 
 function shouldRetryAutoResult(result) {
   const status = String(result?.status || "").toLowerCase();
-  return !["success", "generated", "codex_usage_limit", "codex_exec_failed", "session_expired"].includes(status);
+  return !["success", "generated", "publish_uncertain", "codex_usage_limit", "codex_exec_failed", "session_expired"].includes(status);
 }
 
 function autoAttemptLimitForResult(result) {
@@ -305,6 +307,7 @@ function statusBadge(status) {
     codex_usage_limit: "한도초과",
     codex_exec_failed: "Codex실패",
     session_expired: "세션만료",
+    publish_uncertain: "확인필요",
     duplicate_retry: "중복",
     publishing: "발행",
     generating: "생성중"

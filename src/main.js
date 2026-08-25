@@ -10,6 +10,7 @@ const { collectSearchResults, summarizeSourceQuality } = require("./lib/search")
 const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunner");
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession, verifyOpenNaverSession } = require("./lib/naverPublisher");
+const { publishStatusFromError } = require("./lib/publishSafety");
 const { publishToTistory, checkTistorySession } = require("./lib/tistoryPublisher");
 const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, resolveCodexCmdPath, readSettings, writeSettings } = require("./lib/settings");
 const {
@@ -1317,15 +1318,27 @@ async function startJob(form) {
       });
       return { status: "success", resumedPendingPublish: true };
     } catch (error) {
+      const resumeFailedStatus = publishStatusFromError(error);
       if (error.code === "SESSION_EXPIRED" && account.id) {
         updateAccountSession(runtimeRoot, account.id, "expired", settings);
         emitAccountStore(runtimeRoot);
       }
+      if (resumeFailedStatus === "publish_uncertain") {
+        writeSettings(runtimeRoot, {
+          pendingNaverPublishDraft: {
+            ...pendingDraft,
+            status: "publish_uncertain",
+            uncertainAt: new Date().toISOString(),
+            uncertainReason: error.message
+          }
+        });
+        safeLog(jobId, "발행 결과가 불확실하여 보류 draft를 자동 재발행 대상에서 제외했습니다. 블로그 목록을 수동 확인해 주세요.", "warn");
+      }
       safeLog(jobId, error.message, "error");
-      updateStatus(jobId, error.code === "SESSION_EXPIRED" ? "session_expired" : "failed", error.message);
+      updateStatus(jobId, resumeFailedStatus, error.message);
       emit("job:complete", {
         ...nonSensitiveJob,
-        status: error.code === "SESSION_EXPIRED" ? "session_expired" : "failed",
+        status: resumeFailedStatus,
         title: resumeAgentResult.title,
         article: resumeAgentResult.article,
         images: getPreviewImages(resumeAgentResult),
@@ -1334,7 +1347,7 @@ async function startJob(form) {
         history: readHistory(runtimeRoot)
       });
       return {
-        status: error.code === "SESSION_EXPIRED" ? "session_expired" : "failed",
+        status: resumeFailedStatus,
         reason: error.message,
         resumedPendingPublish: true
       };
@@ -1759,11 +1772,13 @@ async function startJob(form) {
     });
     return { status: publishStatus, keywordLane: keywordLaneResultPayload(latestLaneResult) };
   } catch (error) {
-    const failedStatus = error.code === "SESSION_EXPIRED"
-      ? "session_expired"
-      : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"
-        : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"
-          : "failed";
+    const failedStatus = error.code === "NAVER_PUBLISH_UNCERTAIN"
+      ? "publish_uncertain"
+      : error.code === "SESSION_EXPIRED"
+        ? "session_expired"
+        : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"
+          : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"
+            : "failed";
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
     if (failedStatus === "session_expired" && account.id) {
       updateAccountSession(runtimeRoot, account.id, "expired", settings);

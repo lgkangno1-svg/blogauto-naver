@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { publishOutcomeUncertainError, verifyPublishedTitle } = require("./publishSafety");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -2535,8 +2536,30 @@ async function publishToNaver(options) {
     if (!finalPublished) {
       throw new Error("최종 발행 버튼을 찾을 수 없습니다. 발행 화면 DOM 확인이 필요합니다.");
     }
-    await assertNaverSessionActive(page, selectors, log, "최종 발행");
-    await waitForPublishCompletion(page, selectors, log);
+
+    // From this point the remote publish may already have committed. Never turn an
+    // ambiguous verification failure into a blind retry. Verify independently first.
+    try {
+      await assertNaverSessionActive(page, selectors, log, "최종 발행");
+      await waitForPublishCompletion(page, selectors, log);
+      return { status: "published", verification: "editor", url: page.url() };
+    } catch (error) {
+      const verification = await verifyPublishedTitle({
+        page,
+        blogId: resolveBlogId(options),
+        title: options.title,
+        log
+      });
+      if (verification.verified) {
+        return { status: "verified", verification: verification.reason, url: verification.url };
+      }
+      throw publishOutcomeUncertainError(error, {
+        blogId: resolveBlogId(options),
+        title: options.title,
+        lastUrl: page.url(),
+        verificationReason: verification.reason
+      });
+    }
   } finally {
     if (ownsContext) {
       await context.close();
