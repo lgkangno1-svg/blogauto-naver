@@ -41,13 +41,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Apply idempotent V2 patches
+      - name: Apply core patch and verify
         run: |
           node scripts/apply-v2-core.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply UI patch and verify
+        run: |
           node scripts/apply-v2-ui.js
+          node --check src/lib/settings.js
+          node --check src/renderer/app.js
+
+      - name: Apply publish safety patch and verify
+        run: |
           node scripts/apply-v2-publish-safety.js
+          node --check src/lib/naverPublisher.js
+          node --check src/main.js
+          node --check src/renderer/app.js
+
+      - name: Apply partial repair patch and verify
+        run: |
           node scripts/apply-v2-partial-repair.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply early title gate and verify
+        run: |
           node scripts/apply-v2-early-title-gate.js
+          node --check src/lib/codexRunner.js
 
       - name: Syntax check V2 policy modules
         run: |
@@ -57,14 +77,6 @@ jobs:
           node --check src/lib/publishSafety.js
           node --check src/lib/partialRepair.js
           node --check src/lib/titleNovelty.js
-
-      - name: Syntax check generated integrations
-        run: |
-          node --check src/lib/codexRunner.js
-          node --check src/lib/naverPublisher.js
-          node --check src/lib/settings.js
-          node --check src/main.js
-          node --check src/renderer/app.js
 
       - name: Run V2 regression checks
         run: |
