@@ -15,10 +15,23 @@ function replaceOnce(from, to, label) {
   changed = true;
 }
 
+function replaceAllExact(from, to, label) {
+  if (source.includes(to) && !source.includes(from)) return;
+  if (!source.includes(from)) throw new Error(`V2 patch anchor not found: ${label}`);
+  source = source.split(from).join(to);
+  changed = true;
+}
+
 replaceOnce(
   'const { spawn } = require("node:child_process");\n',
   'const { spawn } = require("node:child_process");\nconst { evaluateArticleQuality } = require("./qualityGate");\nconst { adaptiveEffort, tokenSavings } = require("./tokenPolicy");\n',
   "imports"
+);
+
+replaceOnce(
+  'const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");\n',
+  'const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");\nconst { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");\n',
+  "evidence ledger import"
 );
 
 replaceOnce(
@@ -37,6 +50,30 @@ replaceOnce(
   '  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 1;',
   '  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 2;',
   "manual deterministic repair allowance"
+);
+
+replaceOnce(
+  `    JSON.stringify(compactSearchResultsForPrompt(searchResults, {\n      maxResults: 8,\n      excerptChars: 700\n    }), null, 2),`,
+  `    JSON.stringify(buildEvidenceLedger(searchResults, {\n      topic,\n      keyword,\n      maxSources: 8,\n      maxEvidenceChars: 360\n    }), null, 2),`,
+  "writer evidence ledger"
+);
+
+replaceOnce(
+  '    researchTitleResult ? "Full Research/Title handoff for factual support only:" : "",\n    researchTitleResult ? JSON.stringify(researchTitleResult, null, 2) : "",',
+  '    researchTitleResult ? "Compact Research/Title handoff for factual support only:" : "",\n    researchTitleResult ? JSON.stringify(compactResearchHandoff(researchTitleResult), null, 2) : "",',
+  "compact writer handoff"
+);
+
+replaceOnce(
+  '    JSON.stringify(historyTitles.slice(0, 80), null, 2),',
+  '    JSON.stringify(historyTitles.slice(0, 30), null, 2),',
+  "compact duplicate awareness"
+);
+
+replaceAllExact(
+  '    JSON.stringify(researchTitleResult || {}, null, 2),',
+  '    JSON.stringify(compactResearchHandoff(researchTitleResult || {}), null, 2),',
+  "compact downstream research handoff"
 );
 
 replaceOnce(
