@@ -8,6 +8,7 @@ on:
     paths:
       - "src/lib/qualityGate.js"
       - "src/lib/tokenPolicy.js"
+      - "src/lib/evidenceLedger.js"
       - "scripts/apply-v2-core.js"
       - "scripts/apply-v2-ui.js"
       - "scripts/check-v2.js"
@@ -42,6 +43,7 @@ jobs:
         run: |
           node --check src/lib/qualityGate.js
           node --check src/lib/tokenPolicy.js
+          node --check src/lib/evidenceLedger.js
           node --check src/lib/codexRunner.js
           node --check src/lib/settings.js
           node --check src/renderer/app.js
@@ -62,5 +64,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/codexRunner.js src/lib/settings.js src/renderer/index.html src/renderer/app.js
-          git commit -m "feat: integrate V2 quality token and UI policies"
+          git commit -m "feat: integrate V2 evidence quality token and UI policies"
           git push origin HEAD:upgrade/best-of-v2
