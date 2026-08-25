@@ -5,6 +5,8 @@ const { spawn } = require("node:child_process");
 const { evaluateArticleQuality } = require("./qualityGate");
 const { evaluateTitleNovelty } = require("./titleNovelty");
 const { shouldRefineWriterContract } = require("./contractPolicy");
+const { chooseAdaptiveAgentModels } = require("./adaptiveReasoning");
+const { readHistory } = require("./history");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
 const { planPartialRepair, buildPartialRepairPrompt, mergePartialRepairResult, partialRepairEffort } = require("./partialRepair");
@@ -2133,6 +2135,7 @@ async function runCodexGeneration(options, log = () => {}) {
       rateLimits: latestRateLimits,
       agents: { ...agentTokenTotals },
       grossAgents: { ...agentGrossTokenTotals },
+      adaptiveReasoning: effectiveOptions.adaptiveReasoning || null,
       ...savings
     };
   };
@@ -2480,6 +2483,32 @@ async function runCodexGeneration(options, log = () => {}) {
     };
   }
 
+  let adaptiveHistory = [];
+  try {
+    if (effectiveOptions.runtimeRoot) adaptiveHistory = readHistory(effectiveOptions.runtimeRoot);
+  } catch (error) {
+    log(`Adaptive reasoning history read skipped: ${error.message}`, "warn", "main");
+  }
+  const adaptiveReasoning = chooseAdaptiveAgentModels({
+    history: adaptiveHistory,
+    blogId: effectiveOptions.blogId || "",
+    tokenMode: effectiveOptions.tokenMode || effectiveOptions.tokenEfficiencyMode || "balanced",
+    requestedModels: effectiveOptions.agentModels,
+    topic: finalTitle || effectiveOptions.topic,
+    topicMode: effectiveOptions.topicMode,
+    freshnessLevel: effectiveOptions.freshnessLevel,
+    sourceQuality: effectiveOptions.sourceQuality
+  });
+  effectiveOptions = {
+    ...effectiveOptions,
+    agentModels: adaptiveReasoning.applied
+      ? normalizeAgentModels(adaptiveReasoning.agentModels)
+      : effectiveOptions.agentModels,
+    adaptiveReasoning
+  };
+  if (adaptiveReasoning.applied) {
+    log(`토큰 자동튜닝 적용: ${adaptiveReasoning.reasons.join(" / ")}`, "info", "main");
+  }
   const refineWriterContract = async (promptFileName = "writer-contract-prompt.txt") => {
     const draftWriterContract = buildWriterContract(researchResult, {
       topic: finalTitle || effectiveOptions.topic,
