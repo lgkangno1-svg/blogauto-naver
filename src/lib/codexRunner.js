@@ -5,6 +5,7 @@ const { spawn } = require("node:child_process");
 const { evaluateArticleQuality } = require("./qualityGate");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
+const { planPartialRepair, buildPartialRepairPrompt, mergePartialRepairResult, partialRepairEffort } = require("./partialRepair");
 
 const DEFAULT_AGENT_MODELS = {
   main: "high",
@@ -2768,7 +2769,7 @@ async function runCodexGeneration(options, log = () => {}) {
       };
     }
 
-    const deterministicQuality = evaluateArticleQuality({
+    let deterministicQuality = evaluateArticleQuality({
       topic: effectiveOptions.topic || finalTitle,
       title: String(writerResult.title || finalTitle || "").trim(),
       article: String(writerResult.article || ""),
@@ -2777,6 +2778,74 @@ async function runCodexGeneration(options, log = () => {}) {
       sourceQuality: effectiveOptions.sourceQuality || null
     });
     writerResult = { ...writerResult, deterministicQuality };
+
+    if (!deterministicQuality.pass) {
+      const repairPlan = planPartialRepair(deterministicQuality);
+      if (repairPlan.eligible) {
+        log(`Writer 부분 수정 시작: ${repairPlan.issueCodes.join(", ")}`, "info", "writer");
+        const repairResultFileName = `writer-partial-repair-${attempt}-result.json`;
+        const repairResult = await runCodexTask({
+          options: {
+            ...effectiveOptions,
+            agentModels: {
+              ...(effectiveOptions.agentModels || {}),
+              writer: partialRepairEffort(effectiveOptions.tokenEfficiencyMode)
+            }
+          },
+          prompt: buildPartialRepairPrompt({
+            writerResult,
+            deterministicQuality,
+            topic: effectiveOptions.topic || finalTitle,
+            keyword: effectiveOptions.keyword || "",
+            searchResults: effectiveOptions.searchResults || [],
+            resultPath: path.join(effectiveOptions.jobDir, repairResultFileName)
+          }),
+          promptFileName: `writer-partial-repair-${attempt}-prompt.txt`,
+          resultFileName: repairResultFileName,
+          log,
+          tokenOffset: totalTokens,
+          grossTokenOffset: totalGrossTokens,
+          agentTokenOffset: agentTokenTotals.writer,
+          agent: "writer"
+        });
+        totalTokens += Number(repairResult.tokenUsage?.total || 0);
+        totalGrossTokens += Number(repairResult.tokenUsage?.grossTotal || repairResult.tokenUsage?.total || 0);
+        agentTokenTotals.writer += Number(repairResult.tokenUsage?.total || 0);
+        agentGrossTokenTotals.writer += Number(repairResult.tokenUsage?.grossTotal || repairResult.tokenUsage?.total || 0);
+        rememberRateLimits(repairResult);
+
+        const repairedWriterResult = mergePartialRepairResult(writerResult, repairResult);
+        if (repairedWriterResult) {
+          const repairedQuality = evaluateArticleQuality({
+            topic: effectiveOptions.topic || finalTitle,
+            title: String(repairedWriterResult.title || finalTitle || "").trim(),
+            article: String(repairedWriterResult.article || ""),
+            historyTitles: effectiveOptions.historyTitles || [],
+            searchResults: effectiveOptions.searchResults || [],
+            sourceQuality: effectiveOptions.sourceQuality || null
+          });
+          if (repairedQuality.pass) {
+            deterministicQuality = repairedQuality;
+            writerResult = {
+              ...repairedWriterResult,
+              deterministicQuality: repairedQuality,
+              partialRepair: {
+                applied: true,
+                issueCodes: repairPlan.issueCodes,
+                tokenUsage: repairResult.tokenUsage || null
+              }
+            };
+            log("Writer 부분 수정으로 무료 품질 게이트를 통과했습니다. 전체 본문 재작성은 생략합니다.", "info", "writer");
+          } else {
+            log(`Writer 부분 수정 후에도 품질 문제가 남아 기존 전체 재작성 경로로 전환합니다: ${repairedQuality.repairFeedback || "unknown"}`, "warn", "writer");
+            deterministicQuality = repairedQuality;
+            writerResult = { ...repairedWriterResult, deterministicQuality: repairedQuality };
+          }
+        } else {
+          log("Writer 부분 수정 결과가 유효하지 않아 기존 전체 재작성 경로로 전환합니다.", "warn", "writer");
+        }
+      }
+    }
 
     if (!deterministicQuality.pass) {
       const qualityReason = deterministicQuality.repairFeedback || "Deterministic quality gate failed.";
