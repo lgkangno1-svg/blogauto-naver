@@ -49,7 +49,7 @@ jobs:
           node scripts/apply-v2-partial-repair.js
           node scripts/apply-v2-early-title-gate.js
 
-      - name: Syntax check upgraded modules
+      - name: Syntax check V2 policy modules
         run: |
           node --check src/lib/qualityGate.js
           node --check src/lib/tokenPolicy.js
@@ -57,7 +57,12 @@ jobs:
           node --check src/lib/publishSafety.js
           node --check src/lib/partialRepair.js
           node --check src/lib/titleNovelty.js
-          node --check src/lib/codexRunner.js
+
+      - name: Syntax check generated Codex runner
+        run: node --check src/lib/codexRunner.js
+
+      - name: Syntax check publishing integration
+        run: |
           node --check src/lib/naverPublisher.js
           node --check src/lib/settings.js
           node --check src/main.js
