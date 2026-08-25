@@ -9,6 +9,8 @@ const state = {
   saveTimer: null,
   autoDelayWake: null,
   tokenTotal: 0,
+  tokenGrossTotal: 0,
+  tokenSavedTotal: 0,
   codexRateLimits: null,
   chrome: { available: true, path: "" },
   accountStore: { selectedAccountId: "", accounts: [] },
@@ -214,6 +216,20 @@ function formatTokens(total) {
 function setTokenTotal(total) {
   state.tokenTotal = Number(total || 0);
   $("#tokenBadge").textContent = `누적 ${formatTokens(state.tokenTotal)}`;
+}
+
+function setTokenUsage(payload = {}) {
+  const total = Number(payload.total || 0);
+  const gross = Math.max(total, Number(payload.grossTotal || total || 0));
+  const saved = Math.max(0, Number(payload.cachedOrSavedTokens ?? (gross - total)));
+  const savingsPercent = Number.isFinite(Number(payload.savingsPercent))
+    ? Number(payload.savingsPercent)
+    : (gross > 0 ? ((saved / gross) * 100) : 0);
+  state.tokenGrossTotal = gross;
+  state.tokenSavedTotal = saved;
+  setTokenTotal(total);
+  const badge = $("#tokenSavingsBadge");
+  if (badge) badge.textContent = `캐시/절감 ${Math.round(savingsPercent * 10) / 10}% · ${saved.toLocaleString()}`;
 }
 
 function formatPercent(value) {
@@ -1166,6 +1182,7 @@ function collectForm(target = {}) {
     trustBlogAsSource: category?.trustBlogAsSource === true,
     codexCmdPath: "codex.cmd",
     codexModel: normalizeCodexModel($("#codexModel")?.value),
+    tokenEfficiencyMode: $("#tokenEfficiencyMode")?.value || "balanced",
     primarySearchProvider: searchProviders.primarySearchProvider,
     fallbackSearchProvider: searchProviders.fallbackSearchProvider,
     naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
@@ -1198,7 +1215,8 @@ function applySettings(settings) {
     publishVisibility: "#publishVisibility",
     publishScheduleMode: "#publishScheduleMode",
     reserveAfterHours: "#reserveAfterHours",
-    maxBodyImages: "#maxBodyImages"
+    maxBodyImages: "#maxBodyImages",
+    tokenEfficiencyMode: "#tokenEfficiencyMode"
   };
   for (const [key, selector] of Object.entries(map)) {
     if (settings[key] !== undefined && $(selector)) {
@@ -1248,6 +1266,7 @@ async function saveSettingsNow() {
     maxBodyImages: form.maxBodyImages,
     breakSentencesInBody: form.breakSentencesInBody,
     codexModel: form.codexModel,
+    tokenEfficiencyMode: form.tokenEfficiencyMode,
     agentModels: form.agentModels
   });
   await saveAccountStoreNow();
@@ -1664,14 +1683,14 @@ async function boot() {
     setRunState(payload.status, payload.detail || payload.status);
   });
   window.blogAuto.onTokens((payload) => {
-    setTokenTotal(payload.total || 0);
+    setTokenUsage(payload);
     if (payload.rateLimits) setCodexRateLimits(payload.rateLimits);
   });
   window.blogAuto.onPreview((payload) => {
     $("#articlePreview").value = payload.article || "";
     $("#articleMeta").textContent = payload.title || "본문 생성 완료";
     if (payload.title) $("#selectedTitle").textContent = payload.title;
-    if (payload.tokenUsage) setTokenTotal(payload.tokenUsage.total || 0);
+    if (payload.tokenUsage) setTokenUsage(payload.tokenUsage);
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
     renderImageNotes(payload.imageNotes || []);

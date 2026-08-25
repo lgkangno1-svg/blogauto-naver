@@ -28,6 +28,14 @@
             </select>
           </label>
           <label>
+            <span>토큰 모드</span>
+            <select id="tokenEfficiencyMode">
+              <option value="economy">절약</option>
+              <option value="balanced" selected>균형</option>
+              <option value="quality">품질 우선</option>
+            </select>
+          </label>
+          <label>
             <span>Main Agent</span>
             <select id="mainAgentModel">
               <option value="low">낮음</option>
@@ -66,6 +74,7 @@
         </div>
         <div class="header-actions">
           <span id="tokenBadge" class="badge token">누적 0 tokens</span>
+          <span id="tokenSavingsBadge" class="badge token">캐시/절감 0%</span>
           <span id="codexWeeklyLimitBadge" class="badge limit unknown">주간 잔량 -</span>
           <span id="runState" class="badge info">대기</span>
           <button id="openRuntimeButton" class="ghost" type="button">폴더 열기</button>
