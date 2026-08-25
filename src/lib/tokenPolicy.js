@@ -59,9 +59,12 @@ function recommendedEffort(options = {}, agent = "main") {
 
 function adaptiveEffort(options = {}, agent = "main", configuredEffort = "high") {
   const configured = normalizeEffort(configuredEffort, "high");
+  // xhigh is an explicit operator override in the Electron UI. Never silently
+  // reduce it through economy/balanced automation; the operator opted into cost.
+  if (configured === "xhigh") return configured;
   const recommended = recommendedEffort(options, agent);
   if (!recommended) return configured;
-  // User-selected effort is treated as a ceiling in economy/balanced mode.
+  // Other user-selected efforts are treated as a ceiling in economy/balanced mode.
   return minEffort(configured, recommended);
 }
 
