@@ -17,26 +17,56 @@ for (const importLine of imports) {
   changed = true;
 }
 
-const effectiveOptionsAnchor = `  let effectiveOptions = {\n    ...options,\n    codexModel: normalizeCodexModel(options.codexModel),\n    agentModels: normalizeAgentModels(options.agentModels),\n    searchResults: Array.isArray(options.searchResults) ? options.searchResults : [],\n    sourceQuality: options.sourceQuality || { status: "not_requested" }\n  };`;
-const marker = "const adaptiveReasoning = chooseAdaptiveAgentModels({";
-if (!source.includes(marker)) {
-  if (!source.includes(effectiveOptionsAnchor)) throw new Error("effectiveOptions anchor not found");
-  const block = `${effectiveOptionsAnchor}\n  let adaptiveHistory = [];\n  try {\n    if (effectiveOptions.runtimeRoot) adaptiveHistory = readHistory(effectiveOptions.runtimeRoot);\n  } catch (error) {\n    log(\`Adaptive reasoning history read skipped: \${error.message}\`, "warn", "main");\n  }\n  const adaptiveReasoning = chooseAdaptiveAgentModels({\n    history: adaptiveHistory,\n    blogId: effectiveOptions.blogId || "",\n    tokenMode: effectiveOptions.tokenMode || effectiveOptions.tokenEfficiencyMode || "balanced",\n    requestedModels: effectiveOptions.agentModels,\n    topic: effectiveOptions.topic,\n    topicMode: effectiveOptions.topicMode,\n    freshnessLevel: effectiveOptions.freshnessLevel,\n    sourceQuality: effectiveOptions.sourceQuality\n  });\n  if (adaptiveReasoning.applied) {\n    effectiveOptions = {\n      ...effectiveOptions,\n      agentModels: normalizeAgentModels(adaptiveReasoning.agentModels),\n      adaptiveReasoning\n    };\n    log(\`토큰 자동튜닝 적용: \${adaptiveReasoning.reasons.join(" / ")}\`, "info", "main");\n  } else {\n    effectiveOptions = { ...effectiveOptions, adaptiveReasoning };\n  }`;
-  source = source.replace(effectiveOptionsAnchor, block);
+// Do not tune before Research finishes: sourceQuality can become strict/high-risk only
+// after supplemental search. Apply immediately before Writer Contract / Writer work.
+const adaptiveMarker = "const adaptiveReasoning = chooseAdaptiveAgentModels({";
+if (!source.includes(adaptiveMarker)) {
+  const insertAnchor = '  const refineWriterContract = async (promptFileName = "writer-contract-prompt.txt") => {';
+  if (!source.includes(insertAnchor)) throw new Error("Writer Contract function anchor not found");
+  const block = [
+    '  let adaptiveHistory = [];',
+    '  try {',
+    '    if (effectiveOptions.runtimeRoot) adaptiveHistory = readHistory(effectiveOptions.runtimeRoot);',
+    '  } catch (error) {',
+    '    log(`Adaptive reasoning history read skipped: ${error.message}`, "warn", "main");',
+    '  }',
+    '  const adaptiveReasoning = chooseAdaptiveAgentModels({',
+    '    history: adaptiveHistory,',
+    '    blogId: effectiveOptions.blogId || "",',
+    '    tokenMode: effectiveOptions.tokenMode || effectiveOptions.tokenEfficiencyMode || "balanced",',
+    '    requestedModels: effectiveOptions.agentModels,',
+    '    topic: finalTitle || effectiveOptions.topic,',
+    '    topicMode: effectiveOptions.topicMode,',
+    '    freshnessLevel: effectiveOptions.freshnessLevel,',
+    '    sourceQuality: effectiveOptions.sourceQuality',
+    '  });',
+    '  effectiveOptions = {',
+    '    ...effectiveOptions,',
+    '    agentModels: adaptiveReasoning.applied',
+    '      ? normalizeAgentModels(adaptiveReasoning.agentModels)',
+    '      : effectiveOptions.agentModels,',
+    '    adaptiveReasoning',
+    '  };',
+    '  if (adaptiveReasoning.applied) {',
+    '    log(`토큰 자동튜닝 적용: ${adaptiveReasoning.reasons.join(" / ")}`, "info", "main");',
+    '  }',
+    ''
+  ].join("\n");
+  source = source.replace(insertAnchor, `${block}${insertAnchor}`);
   changed = true;
 }
 
-const tokenSnapshotAnchor = `  const tokenUsageSnapshot = () => ({\n    total: totalTokens,\n    grossTotal: totalGrossTokens,\n    rateLimits: latestRateLimits,\n    agents: { ...agentTokenTotals },\n    grossAgents: { ...agentGrossTokenTotals }\n  });`;
-const adaptiveSnapshot = `  const tokenUsageSnapshot = () => ({\n    total: totalTokens,\n    grossTotal: totalGrossTokens,\n    rateLimits: latestRateLimits,\n    agents: { ...agentTokenTotals },\n    grossAgents: { ...agentGrossTokenTotals },\n    adaptiveReasoning: effectiveOptions.adaptiveReasoning || null\n  });`;
-if (!source.includes("adaptiveReasoning: effectiveOptions.adaptiveReasoning || null")) {
-  if (!source.includes(tokenSnapshotAnchor)) throw new Error("tokenUsageSnapshot anchor not found");
-  source = source.replace(tokenSnapshotAnchor, adaptiveSnapshot);
+const snapshotAnchor = '      grossAgents: { ...agentGrossTokenTotals },\n      ...savings';
+const snapshotReplacement = '      grossAgents: { ...agentGrossTokenTotals },\n      adaptiveReasoning: effectiveOptions.adaptiveReasoning || null,\n      ...savings';
+if (!source.includes('adaptiveReasoning: effectiveOptions.adaptiveReasoning || null')) {
+  if (!source.includes(snapshotAnchor)) throw new Error("tokenUsageSnapshot savings anchor not found");
+  source = source.replace(snapshotAnchor, snapshotReplacement);
   changed = true;
 }
 
 if (changed) {
   fs.writeFileSync(target, source, "utf8");
-  console.log("Applied V2 conservative adaptive reasoning policy");
+  console.log("Applied V2 conservative adaptive reasoning policy after Research");
 } else {
   console.log("V2 conservative adaptive reasoning policy already applied");
 }
