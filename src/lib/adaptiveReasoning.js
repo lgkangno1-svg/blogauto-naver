@@ -1,5 +1,4 @@
 const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
-const AGENTS = ["research", "writer", "main", "image", "imageStyle"];
 
 const HIGH_RISK_TERMS = [
   "정부", "지원금", "장려금", "세금", "환급", "보조금", "정책", "법률", "법 ", "자격",
@@ -73,16 +72,9 @@ function isHighRiskContext({ topic = "", topicMode = "manual", freshnessLevel = 
   const text = String(topic || "").toLowerCase();
   if (HIGH_RISK_TERMS.some((term) => text.includes(term.toLowerCase()))) return true;
   if (sourceQuality?.strictEvidenceRequired === true) return true;
+  if (sourceQuality?.authorityEvidenceRequired === true) return true;
   if (sourceQuality?.independentEvidenceRequired === true) return true;
   return false;
-}
-
-function lowerOneStep(value, floor = "medium") {
-  const effort = normalizeEffort(value);
-  if (effort === "xhigh") return effort; // explicit xhigh is treated as an operator override.
-  if (effort === "high") return "medium";
-  if (effort === "medium" && floor === "low") return "low";
-  return effort;
 }
 
 function chooseAdaptiveAgentModels({
@@ -94,7 +86,7 @@ function chooseAdaptiveAgentModels({
   topicMode = "manual",
   freshnessLevel = "auto",
   sourceQuality = null,
-  minSamples = 5,
+  minSamples = 8,
   historyLimit = 20
 } = {}) {
   const mode = String(tokenMode || "balanced").toLowerCase();
@@ -120,43 +112,33 @@ function chooseAdaptiveAgentModels({
     result.reasons.push("정책·금전·최신성 또는 자동주제 위험 신호가 있어 reasoning을 자동 하향하지 않습니다.");
     return result;
   }
-  if (rows.length < Math.max(1, Number(minSamples) || 5)) {
+  if (rows.length < Math.max(1, Number(minSamples) || 8)) {
     result.reasons.push(`성공 작업 표본이 ${rows.length}건이라 자동튜닝 최소 ${minSamples}건에 미달합니다.`);
     return result;
   }
 
   const { shares } = aggregateAgentShares(rows);
   result.agentShares = shares;
-  const floor = mode === "economy" ? "low" : "medium";
-  const threshold = mode === "economy" ? 0.3 : 0.4;
-  const candidates = ["writer", "main", "research"]
-    .filter((agent) => Number(shares[agent] || 0) >= threshold)
-    .sort((a, b) => Number(shares[b] || 0) - Number(shares[a] || 0));
 
-  // Balanced mode changes at most one text agent per job. Economy may tune two.
-  const maxChanges = mode === "economy" ? 2 : 1;
-  for (const agent of candidates.slice(0, maxChanges)) {
-    const before = result.agentModels[agent];
-    const after = lowerOneStep(before, floor);
-    if (after === before) continue;
-    result.agentModels[agent] = after;
-    result.applied = true;
-    result.reasons.push(`${agent}가 최근 토큰의 ${Math.round(Number(shares[agent] || 0) * 100)}%를 사용해 ${before}→${after}로 한 단계 조정합니다.`);
-  }
-
+  // Economy mode already forces routine text agents to low in tokenPolicy.
+  // Applying a second history policy cannot save more tokens and would only add confusing telemetry.
   if (mode === "economy") {
-    const before = result.agentModels.image;
-    const after = lowerOneStep(before, "low");
-    if (after !== before) {
-      result.agentModels.image = after;
-      result.applied = true;
-      result.reasons.push(`economy 모드에서 Image Worker를 ${before}→${after}로 조정합니다.`);
-    }
+    result.reasons.push("economy 모드는 기존 정적 정책이 이미 low reasoning을 적용하므로 추가 자동튜닝을 생략합니다.");
+    return result;
   }
 
-  if (!result.applied) {
-    result.reasons.push("최근 사용량이 특정 Agent에 과도하게 집중되지 않아 현재 reasoning 설정을 유지합니다.");
+  // Balanced's static baseline is medium for routine Writer/Main/Research work.
+  // Only lower Writer below that baseline when it has remained the clear token bottleneck.
+  // Research/Main stay at the balanced baseline to preserve evidence/review quality.
+  const writerShare = Number(shares.writer || 0);
+  if (writerShare >= 0.55 && requested.writer !== "xhigh") {
+    result.agentModels.writer = "low";
+    result.applied = true;
+    result.reasons.push(`Writer가 최근 토큰의 ${Math.round(writerShare * 100)}%를 지속 사용해 balanced 기준 medium→low로 조정합니다.`);
+    return result;
   }
+
+  result.reasons.push("Writer 토큰 비중이 55% 미만이라 balanced reasoning 기준을 유지합니다.");
   return result;
 }
 
@@ -168,7 +150,6 @@ module.exports = {
     relevantHistory,
     aggregateAgentShares,
     isHighRiskContext,
-    lowerOneStep,
     median,
     tokenNumber
   }
