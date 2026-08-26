@@ -16,6 +16,7 @@ on:
       - "src/lib/contractPolicy.js"
       - "src/lib/jobDiagnostics.js"
       - "src/lib/adaptiveReasoning.js"
+      - "src/lib/researchPreflight.js"
       - "scripts/apply-v2-core.js"
       - "scripts/apply-v2-ui.js"
       - "scripts/apply-v2-publish-safety.js"
@@ -26,6 +27,7 @@ on:
       - "scripts/apply-v2-job-diagnostics.js"
       - "scripts/apply-v2-history-diagnostics.js"
       - "scripts/apply-v2-adaptive-reasoning.js"
+      - "scripts/apply-v2-research-preflight.js"
       - "scripts/check-v2.js"
       - "scripts/check-v2-early-title-gate.js"
       - "scripts/check-v2-source-cache.js"
@@ -33,6 +35,7 @@ on:
       - "scripts/check-v2-job-diagnostics.js"
       - "scripts/check-v2-history-diagnostics.js"
       - "scripts/check-v2-adaptive-reasoning.js"
+      - "scripts/check-v2-research-preflight.js"
       - ".github/workflows/v2-core-upgrade.yml"
 
 concurrency:
@@ -100,6 +103,12 @@ jobs:
           node --check src/lib/search.js
           node --check src/main.js
 
+      - name: Apply deterministic Research preflight and verify
+        run: |
+          node scripts/apply-v2-research-preflight.js
+          node --check src/lib/researchPreflight.js
+          node --check src/lib/codexRunner.js
+
       - name: Apply per-job token diagnostics and verify
         run: |
           if grep -q 'jobTokenUsage.diagnostics' src/main.js \
@@ -138,6 +147,7 @@ jobs:
           node --check src/lib/contractPolicy.js
           node --check src/lib/jobDiagnostics.js
           node --check src/lib/adaptiveReasoning.js
+          node --check src/lib/researchPreflight.js
 
       - name: Run V2 regression checks
         run: |
@@ -148,6 +158,7 @@ jobs:
           node scripts/check-v2-job-diagnostics.js
           node scripts/check-v2-history-diagnostics.js
           node scripts/check-v2-adaptive-reasoning.js
+          node scripts/check-v2-research-preflight.js
 
       - name: Run repository checks
         run: npm run check
@@ -162,5 +173,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/codexRunner.js src/lib/naverPublisher.js src/lib/settings.js src/lib/search.js src/main.js src/renderer/index.html src/renderer/app.js
-          git commit -m "feat: integrate V2 adaptive Codex reasoning optimization"
+          git commit -m "feat: integrate V2 deterministic research preflight"
           git push origin HEAD:upgrade/best-of-v2
