@@ -6,6 +6,7 @@ const { evaluateArticleQuality } = require("./qualityGate");
 const { evaluateTitleNovelty } = require("./titleNovelty");
 const { shouldRefineWriterContract } = require("./contractPolicy");
 const { chooseAdaptiveAgentModels } = require("./adaptiveReasoning");
+const { deterministicSearchPreflight, buildPreflightResearchRequest } = require("./researchPreflight");
 const { readHistory } = require("./history");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
@@ -2200,6 +2201,34 @@ async function runCodexGeneration(options, log = () => {}) {
     accountImageStylePrompt
   };
 
+  let researchSearchRound = 0;
+  const researchPreflight = deterministicSearchPreflight(effectiveOptions);
+  if (
+    researchPreflight.shouldSearchFirst
+    && effectiveOptions.searchResults.length === 0
+    && typeof options.onSearchNeeded === "function"
+  ) {
+    log(
+      `토큰 최적화: 첫 Research 검색판정 호출을 생략하고 자료를 먼저 수집합니다. (${researchPreflight.searchNeed}: ${researchPreflight.reasons.join(", ")})`,
+      "info",
+      "research"
+    );
+    const preflightRequest = buildPreflightResearchRequest(effectiveOptions, researchPreflight);
+    const searchPayload = await options.onSearchNeeded(preflightRequest, {
+      round: 1,
+      previousSearchResults: effectiveOptions.searchResults,
+      sourceQuality: effectiveOptions.sourceQuality,
+      deterministicPreflight: true
+    });
+    effectiveOptions = {
+      ...effectiveOptions,
+      searchResults: Array.isArray(searchPayload?.searchResults) ? searchPayload.searchResults : [],
+      sourceQuality: searchPayload?.sourceQuality || { status: "unknown" },
+      researchSearchPreflight: researchPreflight
+    };
+    researchSearchRound = 1;
+  }
+
   let researchResult = await runCodexTask({
     options: effectiveOptions,
     prompt: buildResearchTitlePrompt(effectiveOptions),
@@ -2224,7 +2253,6 @@ async function runCodexGeneration(options, log = () => {}) {
   const validSearchNeeds = new Set(["skip", "light", "normal", "strict"]);
   let needsSearch = ["light", "normal", "strict"].includes(requestedSearchNeed);
   const maxResearchSearchRounds = 2;
-  let researchSearchRound = 0;
   while (
     needsSearch
     && typeof options.onSearchNeeded === "function"
