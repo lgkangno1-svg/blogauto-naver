@@ -44,11 +44,19 @@ replaceOnce(
   "adaptive effort"
 );
 
-replaceOnce(
-  `  const tokenUsageSnapshot = () => ({\n    total: totalTokens,\n    grossTotal: totalGrossTokens,\n    rateLimits: latestRateLimits,\n    agents: { ...agentTokenTotals },\n    grossAgents: { ...agentGrossTokenTotals }\n  });`,
-  `  const tokenUsageSnapshot = () => {\n    const savings = tokenSavings(totalGrossTokens, totalTokens);\n    return {\n      total: totalTokens,\n      grossTotal: totalGrossTokens,\n      rateLimits: latestRateLimits,\n      agents: { ...agentTokenTotals },\n      grossAgents: { ...agentGrossTokenTotals },\n      ...savings\n    };\n  };`,
-  "token savings snapshot"
-);
+// Later V2 iterations may append diagnostics fields such as adaptiveReasoning to
+// the snapshot. Treat any snapshot that already computes tokenSavings as integrated
+// instead of requiring the original exact replacement text.
+const tokenSnapshotAlreadyIntegrated = source.includes("const tokenUsageSnapshot = () => {")
+  && source.includes("const savings = tokenSavings(totalGrossTokens, totalTokens);")
+  && source.includes("...savings");
+if (!tokenSnapshotAlreadyIntegrated) {
+  replaceOnce(
+    `  const tokenUsageSnapshot = () => ({\n    total: totalTokens,\n    grossTotal: totalGrossTokens,\n    rateLimits: latestRateLimits,\n    agents: { ...agentTokenTotals },\n    grossAgents: { ...agentGrossTokenTotals }\n  });`,
+    `  const tokenUsageSnapshot = () => {\n    const savings = tokenSavings(totalGrossTokens, totalTokens);\n    return {\n      total: totalTokens,\n      grossTotal: totalGrossTokens,\n      rateLimits: latestRateLimits,\n      agents: { ...agentTokenTotals },\n      grossAgents: { ...agentGrossTokenTotals },\n      ...savings\n    };\n  };`,
+    "token savings snapshot"
+  );
+}
 
 replaceOnce(
   '  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 1;',
