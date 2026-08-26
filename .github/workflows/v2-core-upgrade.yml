@@ -149,16 +149,29 @@ jobs:
           node --check src/lib/adaptiveReasoning.js
           node --check src/lib/researchPreflight.js
 
-      - name: Run V2 regression checks
-        run: |
-          node scripts/check-v2.js
-          node scripts/check-v2-early-title-gate.js
-          node scripts/check-v2-source-cache.js
-          node scripts/check-v2-adaptive-contract.js
-          node scripts/check-v2-job-diagnostics.js
-          node scripts/check-v2-history-diagnostics.js
-          node scripts/check-v2-adaptive-reasoning.js
-          node scripts/check-v2-research-preflight.js
+      - name: Check V2 core quality and token policies
+        run: node scripts/check-v2.js
+
+      - name: Check V2 early title gate
+        run: node scripts/check-v2-early-title-gate.js
+
+      - name: Check V2 source cache
+        run: node scripts/check-v2-source-cache.js
+
+      - name: Check V2 adaptive Writer Contract
+        run: node scripts/check-v2-adaptive-contract.js
+
+      - name: Check V2 per-job diagnostics
+        run: node scripts/check-v2-job-diagnostics.js
+
+      - name: Check V2 durable history diagnostics
+        run: node scripts/check-v2-history-diagnostics.js
+
+      - name: Check V2 adaptive reasoning
+        run: node scripts/check-v2-adaptive-reasoning.js
+
+      - name: Check V2 deterministic Research preflight
+        run: node scripts/check-v2-research-preflight.js
 
       - name: Run repository checks
         run: npm run check
