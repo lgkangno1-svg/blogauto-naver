@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   ttlForFreshness,
+  normalizeUrl,
   readSourceCache,
   writeSourceCache,
   pruneSourceCache
@@ -14,7 +15,17 @@ try {
   assert(ttlForFreshness("high") < ttlForFreshness("auto"));
   assert(ttlForFreshness("auto") < ttlForFreshness("low"));
 
-  const url = "https://example.com/article?x=1#section";
+  assert.strictEqual(
+    normalizeUrl("https://EXAMPLE.com:443/article/?b=2&utm_source=naver&a=1#section"),
+    "https://example.com/article?a=1&b=2"
+  );
+  assert.strictEqual(
+    normalizeUrl("https://example.com/article?a=1&b=2&fbclid=tracking"),
+    "https://example.com/article?a=1&b=2"
+  );
+
+  const url = "https://example.com/article?x=1&utm_source=naver#section";
+  const canonicalAlias = "https://EXAMPLE.com:443/article/?x=1&fbclid=tracking";
   const value = {
     fetchedUrl: "https://example.com/article?x=1",
     contentLength: 500,
@@ -25,7 +36,7 @@ try {
 
   const fresh = readSourceCache({
     runtimeRoot: temp,
-    url,
+    url: canonicalAlias,
     freshnessLevel: "high",
     nowMs: Date.parse("2026-08-26T00:30:00Z")
   });
@@ -43,7 +54,7 @@ try {
 
   const longLived = readSourceCache({
     runtimeRoot: temp,
-    url,
+    url: canonicalAlias,
     freshnessLevel: "low",
     nowMs: Date.parse("2026-08-27T00:00:00Z")
   });
