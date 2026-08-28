@@ -1,3 +1,5 @@
+const { normalizeUrl } = require("./sourceCache");
+
 function compactText(value, limit = 360) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, limit);
 }
@@ -31,9 +33,6 @@ function selectEvidenceSentences(text, terms, maxChars = 360) {
     .map((sentence, index) => ({ sentence, index, score: sentenceScore(sentence, terms) }))
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  // Prefer sentences that actually support the topic/keyword or contain a concrete fact.
-  // Zero-signal prose is useful only as a last-resort fallback and should not consume the
-  // repeated Writer/Main prompt budget.
   const useful = ranked.filter((item) => item.score > 0);
   const candidates = useful.length ? useful : ranked.slice(0, 1);
   const selected = [];
@@ -78,7 +77,8 @@ function sourcePriority(item = {}) {
 }
 
 function sourceIdentity(item = {}) {
-  const url = String(item.fetchedUrl || item.url || "").trim().toLowerCase();
+  const rawUrl = String(item.fetchedUrl || item.url || "").trim();
+  const url = normalizeUrl(rawUrl).toLowerCase();
   if (url) return `url:${url}`;
   const title = compactText(item.title, 180).toLowerCase();
   return title ? `title:${title}` : "";
@@ -217,8 +217,6 @@ function compactResearchHandoff(result = {}, { includeWriterContract = false } =
     confirmedFacts: compactList(result.confirmedFacts, 12, 320),
     uncertainItems: compactList(result.uncertainItems, 8, 280),
     sourceBoundaries: compactList(result.sourceBoundaries, 8, 280),
-    // The full excerpt/body belongs in the Evidence Ledger. Repeating it here is a
-    // large prompt leak, so usableSources is intentionally reduced to references.
     usableSources: Array.isArray(result.usableSources)
       ? result.usableSources.slice(0, 8).map(compactSourceRef).filter(Boolean)
       : [],
@@ -226,8 +224,6 @@ function compactResearchHandoff(result = {}, { includeWriterContract = false } =
     currentBridgeSatisfied: result.currentBridgeSatisfied === true || undefined,
     anchorEvent: compactObject(result.anchorEvent, { maxKeys: 5, stringChars: 240 }),
     currentPeg: compactObject(result.currentPeg, { maxKeys: 5, stringChars: 240 }),
-    // buildPrompt already sends the Writer Contract separately as the highest-priority
-    // brief. Excluding it from the support handoff avoids sending the same contract twice.
     writerContract: includeWriterContract
       ? compactObject(result.writerContract, { maxKeys: 16, stringChars: 320 })
       : undefined
@@ -245,6 +241,7 @@ module.exports = {
     sentenceScore,
     sourceStrength,
     sourcePriority,
+    sourceIdentity,
     rankAndDedupeSources,
     termsFrom
   }
