@@ -9,6 +9,7 @@ const {
   writeSourceCache,
   pruneSourceCache
 } = require("../src/lib/sourceCache");
+const { buildEvidenceLedger } = require("../src/lib/evidenceLedger");
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "blogauto-source-cache-"));
 try {
@@ -42,6 +43,23 @@ try {
   });
   assert.strictEqual(fresh.hit, true);
   assert(fresh.value.excerpt.includes("근거 본문"));
+
+  const ledger = buildEvidenceLedger([
+    {
+      title: "공식 안내",
+      url,
+      excerpt: "신청 조건과 대상을 공식 안내합니다.",
+      relevance: { officialSource: true, score: 10 }
+    },
+    {
+      title: "공식 안내 검색복제",
+      fetchedUrl: canonicalAlias,
+      excerpt: "같은 공식 페이지가 추적 파라미터만 다르게 수집됐습니다.",
+      relevance: { officialSource: true, score: 9 }
+    }
+  ], { topic: "신청 조건" });
+  assert.strictEqual(ledger.candidateCount, 1);
+  assert.strictEqual(ledger.sourceCount, 1);
 
   const stale = readSourceCache({
     runtimeRoot: temp,
