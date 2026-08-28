@@ -10,6 +10,18 @@ const TTL_BY_FRESHNESS = {
   auto: 12 * 60 * 60 * 1000,
   low: 72 * 60 * 60 * 1000
 };
+const TRACKING_QUERY_KEYS = new Set([
+  "fbclid",
+  "gclid",
+  "dclid",
+  "msclkid",
+  "igshid",
+  "mc_cid",
+  "mc_eid",
+  "yclid",
+  "_ga",
+  "_gl"
+]);
 
 function normalizeFreshness(value) {
   const normalized = String(value || "auto").trim().toLowerCase();
@@ -20,12 +32,32 @@ function ttlForFreshness(value) {
   return TTL_BY_FRESHNESS[normalizeFreshness(value)];
 }
 
+function isTrackingQueryKey(key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  return normalized.startsWith("utm_") || TRACKING_QUERY_KEYS.has(normalized);
+}
+
 function normalizeUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   try {
     const url = new URL(raw);
     url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) {
+      url.port = "";
+    }
+
+    const stableParams = [];
+    for (const [key, paramValue] of url.searchParams.entries()) {
+      if (isTrackingQueryKey(key)) continue;
+      stableParams.push([key, paramValue]);
+    }
+    stableParams.sort(([keyA, valueA], [keyB, valueB]) => keyA.localeCompare(keyB) || valueA.localeCompare(valueB));
+    url.search = "";
+    for (const [key, paramValue] of stableParams) url.searchParams.append(key, paramValue);
+
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "") || "/";
     return url.toString();
   } catch {
     return raw.replace(/#.*$/, "");
@@ -131,5 +163,5 @@ module.exports = {
   readSourceCache,
   writeSourceCache,
   pruneSourceCache,
-  _private: { cacheDir, cacheKey, cachePath }
+  _private: { cacheDir, cacheKey, cachePath, isTrackingQueryKey }
 };
