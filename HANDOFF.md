@@ -5,7 +5,7 @@
 > Last updated: 2026-08-28 (Asia/Seoul)
 > Active branch: `upgrade/best-of-v2`
 > Active PR: #1 — `Build best-of V2: Codex-first quality and token-efficient pipeline`
-> Baseline before this handoff update: `e950655eeb3cc90d9ba98045e7b8acace8b1ad51`
+> Current remote HEAD before this documentation commit: `6296daaebf1c6bbbf25d960064525d11b3cfc854`
 
 ---
 
@@ -158,9 +158,9 @@ Canonicalization currently:
 - sorts remaining query parameters deterministically;
 - removes non-root trailing slashes.
 
-Why this matters: the same article previously could occupy separate cache entries or Evidence rows solely because it arrived through different campaign/search tracking URLs. That caused avoidable source extraction and duplicate evidence prompt budget. Functional query parameters are preserved, so content-changing query URLs are not intentionally collapsed.
+Why this matters: the same article previously could occupy separate cache entries or Evidence rows solely because it arrived through different campaign/search tracking URLs. That caused avoidable source extraction/cache misses and duplicate evidence prompt budget. Functional query parameters are preserved, so content-changing query URLs are not intentionally collapsed.
 
-Regression coverage now checks both:
+Regression coverage checks both:
 
 - writing a source under one tracked URL and reading it back through a canonical-equivalent alias;
 - deduplicating Evidence Ledger candidates whose URLs differ only by tracking/canonicalization noise.
@@ -251,11 +251,13 @@ This is the highest-severity operational regression area.
 
 ## 9. Current verification status
 
-At the start of the 2026-08-28 iteration, PR #1 was open and mergeable and the remote branch HEAD was the earlier HANDOFF commit `5a51dd8...`.
+PR #1 remains open and mergeable after this iteration.
 
-This iteration pushed source canonicalization and regression-test changes directly to `upgrade/best-of-v2`. The remote branch must be rechecked after this document update and CI/workflow results must be inspected before declaring the iteration fully verified.
+The code/test commit `e950655eeb3cc90d9ba98045e7b8acace8b1ad51` ran the `V2 Core Upgrade` workflow successfully on 2026-08-28. That run includes the new canonical source-cache reuse test and canonical Evidence Ledger deduplication test, together with the workflow's existing V2 integration/regression path. The subsequent commit only updated this living handoff, so no code behavior changed after the successful run.
 
-Important: do not infer CI success merely from source pushes. A future agent must inspect the current HEAD and workflow result explicitly.
+Remote branch state was re-read after the push, and PR #1 reported `mergeable: true`.
+
+Future agents must still inspect the current HEAD and latest workflow before beginning a new iteration; do not assume this verification remains current indefinitely.
 
 ---
 
@@ -343,7 +345,7 @@ Do not lower reasoning from insufficient history or for high-risk/current contex
 
 ### URL canonicalization overreach
 
-Do not strip unknown query parameters merely because they look unnecessary. Some query parameters select language, article version, product, date, pagination, or other content. The current allow-by-preservation / remove-known-trackers approach is intentional.
+Do not strip unknown query parameters merely because they look unnecessary. Some query parameters select language, article version, product, date, pagination, or other content. The current preserve-unknown/remove-known-trackers approach is intentional.
 
 ### UI/IPC shape drift
 
@@ -412,6 +414,8 @@ Decision: canonicalize source URLs for both persistent source-cache keys and Evi
 Reason: search engines, redirects, campaigns, and copied links can represent the same source with UTM/click identifiers, fragments, query ordering, default ports, or trailing-slash differences. Treating these as separate sources wastes extraction/cache capacity and repeated evidence prompt budget.
 
 Safety choice: remove only a conservative known set of tracking parameters while preserving unknown/functional query parameters.
+
+Verification: `V2 Core Upgrade` succeeded on code/test commit `e950655e...`, including the new canonical cache-reuse and evidence-deduplication assertions.
 
 ### 2026-08-26 — Living handoff introduced
 
