@@ -7,6 +7,7 @@ const { evaluateTitleNovelty } = require("./titleNovelty");
 const { shouldRefineWriterContract } = require("./contractPolicy");
 const { chooseAdaptiveAgentModels } = require("./adaptiveReasoning");
 const { deterministicSearchPreflight, buildPreflightResearchRequest } = require("./researchPreflight");
+const { readResearchArtifactCache, writeResearchArtifactCache } = require("./researchArtifactCache");
 const { readHistory } = require("./history");
 const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
 const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
@@ -2123,6 +2124,22 @@ async function runCodexGeneration(options, log = () => {}) {
   let totalTokens = 0;
   let totalGrossTokens = 0;
   let latestRateLimits = null;
+  const researchOptimization = {
+    preflight: {
+      applied: false,
+      searchMode: "",
+      reason: "",
+      codexDecisionCallSkipped: false
+    },
+    artifactCache: {
+      eligible: false,
+      hit: false,
+      reason: "not_checked",
+      codexResearchCallSkipped: false,
+      stored: false,
+      sourceSetHash: ""
+    }
+  };
   const rememberRateLimits = (result) => {
     if (result?.tokenUsage?.rateLimits) {
       latestRateLimits = result.tokenUsage.rateLimits;
@@ -2137,6 +2154,10 @@ async function runCodexGeneration(options, log = () => {}) {
       agents: { ...agentTokenTotals },
       grossAgents: { ...agentGrossTokenTotals },
       adaptiveReasoning: effectiveOptions.adaptiveReasoning || null,
+      researchOptimization: {
+        preflight: { ...researchOptimization.preflight },
+        artifactCache: { ...researchOptimization.artifactCache }
+      },
       ...savings
     };
   };
@@ -2203,6 +2224,10 @@ async function runCodexGeneration(options, log = () => {}) {
 
   let researchSearchRound = 0;
   const researchPreflight = deterministicSearchPreflight(effectiveOptions);
+  researchOptimization.preflight.searchMode = String(researchPreflight.searchNeed || "");
+  researchOptimization.preflight.reason = Array.isArray(researchPreflight.reasons)
+    ? researchPreflight.reasons.join(",")
+    : "";
   if (
     researchPreflight.shouldSearchFirst
     && effectiveOptions.searchResults.length === 0
@@ -2213,6 +2238,8 @@ async function runCodexGeneration(options, log = () => {}) {
       "info",
       "research"
     );
+    researchOptimization.preflight.applied = true;
+    researchOptimization.preflight.codexDecisionCallSkipped = true;
     const preflightRequest = buildPreflightResearchRequest(effectiveOptions, researchPreflight);
     const searchPayload = await options.onSearchNeeded(preflightRequest, {
       round: 1,
@@ -2229,14 +2256,62 @@ async function runCodexGeneration(options, log = () => {}) {
     researchSearchRound = 1;
   }
 
-  let researchResult = await runCodexTask({
-    options: effectiveOptions,
-    prompt: buildResearchTitlePrompt(effectiveOptions),
-    promptFileName: "research-title-prompt.txt",
-    resultFileName: "research-title-result.json",
-    log,
-    agent: "research"
+  const researchCacheClassification = () => deterministicSearchPreflight({
+    ...effectiveOptions,
+    searchResults: []
   });
+  const readCurrentResearchCache = () => {
+    const cacheRead = readResearchArtifactCache({
+      options: effectiveOptions,
+      classification: researchCacheClassification()
+    });
+    researchOptimization.artifactCache.eligible = cacheRead.eligible === true;
+    researchOptimization.artifactCache.reason = String(cacheRead.reason || "unknown");
+    researchOptimization.artifactCache.sourceSetHash = String(cacheRead.sourceFingerprint?.hash || "");
+    return cacheRead;
+  };
+  const maybeStoreResearchCache = (result) => {
+    const cacheWrite = writeResearchArtifactCache({
+      options: effectiveOptions,
+      classification: researchCacheClassification(),
+      result
+    });
+    if (cacheWrite.written) {
+      researchOptimization.artifactCache.stored = true;
+      researchOptimization.artifactCache.eligible = true;
+      researchOptimization.artifactCache.reason = "stored";
+      researchOptimization.artifactCache.sourceSetHash = String(cacheWrite.sourceFingerprint?.hash || researchOptimization.artifactCache.sourceSetHash || "");
+    } else if (researchOptimization.artifactCache.reason === "not_checked") {
+      researchOptimization.artifactCache.eligible = cacheWrite.eligible === true;
+      researchOptimization.artifactCache.reason = String(cacheWrite.reason || "not_stored");
+      researchOptimization.artifactCache.sourceSetHash = String(cacheWrite.sourceFingerprint?.hash || "");
+    }
+    return cacheWrite;
+  };
+
+  const initialResearchCache = readCurrentResearchCache();
+  let researchResult;
+  if (initialResearchCache.hit) {
+    researchOptimization.artifactCache.hit = true;
+    researchOptimization.artifactCache.codexResearchCallSkipped = true;
+    researchOptimization.artifactCache.reason = "hit";
+    researchResult = {
+      ...initialResearchCache.artifact,
+      tokenUsage: { total: 0, grossTotal: 0 },
+      researchArtifactCache: { hit: true, storedAt: initialResearchCache.storedAt || "" }
+    };
+    log("토큰 최적화: 동일 Research 근거/문맥 캐시를 재사용해 Research Codex 호출을 생략합니다.", "info", "research");
+  } else {
+    researchResult = await runCodexTask({
+      options: effectiveOptions,
+      prompt: buildResearchTitlePrompt(effectiveOptions),
+      promptFileName: "research-title-prompt.txt",
+      resultFileName: "research-title-result.json",
+      log,
+      agent: "research"
+    });
+    maybeStoreResearchCache(researchResult);
+  }
 
   totalTokens += Number(researchResult.tokenUsage?.total || 0);
   totalGrossTokens += Number(researchResult.tokenUsage?.grossTotal || researchResult.tokenUsage?.total || 0);
@@ -2291,7 +2366,18 @@ async function runCodexGeneration(options, log = () => {}) {
       searchResults: Array.isArray(searchPayload?.searchResults) ? searchPayload.searchResults : [],
       sourceQuality: searchPayload?.sourceQuality || { status: "unknown" }
     };
-    try {
+    const loopResearchCache = readCurrentResearchCache();
+    if (loopResearchCache.hit) {
+      researchOptimization.artifactCache.hit = true;
+      researchOptimization.artifactCache.codexResearchCallSkipped = true;
+      researchOptimization.artifactCache.reason = "hit";
+      researchResult = {
+        ...loopResearchCache.artifact,
+        tokenUsage: { total: 0, grossTotal: 0 },
+        researchArtifactCache: { hit: true, storedAt: loopResearchCache.storedAt || "" }
+      };
+      log("토큰 최적화: 검색 후 동일 Research 근거/문맥 캐시를 재사용해 재분석 Codex 호출을 생략합니다.", "info", "research");
+    } else try {
       researchResult = await runCodexTask({
         options: effectiveOptions,
         prompt: buildResearchTitlePrompt(effectiveOptions),
@@ -2303,6 +2389,7 @@ async function runCodexGeneration(options, log = () => {}) {
         agentTokenOffset: agentTokenTotals.research,
         agent: "research"
       });
+      maybeStoreResearchCache(researchResult);
       if (researchSearchRound > 1) {
         preserveAgentFile(
           options.jobDir,

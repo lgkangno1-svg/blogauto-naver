@@ -23,6 +23,28 @@ function sumTokens(map = {}) {
   return Object.values(map).reduce((sum, value) => sum + asTokenNumber(value), 0);
 }
 
+function normalizeResearchOptimization(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const preflight = source.preflight && typeof source.preflight === "object" ? source.preflight : {};
+  const artifactCache = source.artifactCache && typeof source.artifactCache === "object" ? source.artifactCache : {};
+  return {
+    preflight: {
+      applied: preflight.applied === true,
+      searchMode: String(preflight.searchMode || ""),
+      reason: String(preflight.reason || "").slice(0, 500),
+      codexDecisionCallSkipped: preflight.codexDecisionCallSkipped === true
+    },
+    artifactCache: {
+      eligible: artifactCache.eligible === true,
+      hit: artifactCache.hit === true,
+      reason: String(artifactCache.reason || "").slice(0, 200),
+      codexResearchCallSkipped: artifactCache.codexResearchCallSkipped === true,
+      stored: artifactCache.stored === true,
+      sourceSetHash: String(artifactCache.sourceSetHash || "").slice(0, 80)
+    }
+  };
+}
+
 function buildJobTokenDiagnostics(tokenUsage = {}) {
   const agents = normalizeAgentMap(tokenUsage.agents);
   const grossAgents = normalizeAgentMap(tokenUsage.grossAgents);
@@ -68,7 +90,8 @@ function buildJobTokenDiagnostics(tokenUsage = {}) {
     grossAgents,
     agentRows,
     largestAgent,
-    hasAgentBreakdown: agentRows.length > 0
+    hasAgentBreakdown: agentRows.length > 0,
+    researchOptimization: normalizeResearchOptimization(tokenUsage.researchOptimization)
   };
 }
 
@@ -85,7 +108,11 @@ function historyTokenFields(tokenUsage = {}) {
       : 0,
     token_agents: normalizeAgentMap(diagnostics.agents),
     token_gross_agents: normalizeAgentMap(diagnostics.grossAgents),
-    token_largest_agent: String(diagnostics.largestAgent?.agent || "")
+    token_largest_agent: String(diagnostics.largestAgent?.agent || ""),
+    research_optimization: normalizeResearchOptimization(diagnostics.researchOptimization || tokenUsage.researchOptimization),
+    research_preflight_skipped_call: normalizeResearchOptimization(diagnostics.researchOptimization || tokenUsage.researchOptimization).preflight.codexDecisionCallSkipped,
+    research_cache_hit: normalizeResearchOptimization(diagnostics.researchOptimization || tokenUsage.researchOptimization).artifactCache.hit,
+    research_cache_skipped_call: normalizeResearchOptimization(diagnostics.researchOptimization || tokenUsage.researchOptimization).artifactCache.codexResearchCallSkipped
   };
 }
 
@@ -163,5 +190,5 @@ module.exports = {
   buildJobTokenDiagnostics,
   historyTokenFields,
   summarizeHistoryTokenDiagnostics,
-  _private: { asTokenNumber, normalizeAgentMap, sumTokens, median }
+  _private: { asTokenNumber, normalizeAgentMap, normalizeResearchOptimization, sumTokens, median }
 };

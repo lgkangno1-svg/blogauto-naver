@@ -1153,6 +1153,7 @@ async function startJob(form) {
     outputTokens: 0,
     agents: {},
     grossAgents: {},
+    researchOptimization: null,
     diagnostics: buildJobTokenDiagnostics({}),
     rateLimits: null
   };
@@ -1461,6 +1462,9 @@ async function startJob(form) {
           jobTokenUsage.inputTokens = Number(usage.inputTokens || 0);
           jobTokenUsage.cachedInputTokens = Number(usage.cachedInputTokens || 0);
           jobTokenUsage.outputTokens = Number(usage.outputTokens || 0);
+          if (usage.researchOptimization && typeof usage.researchOptimization === "object") {
+            jobTokenUsage.researchOptimization = usage.researchOptimization;
+          }
           if (usage.rateLimits) {
             jobTokenUsage.rateLimits = usage.rateLimits;
           }
@@ -1590,6 +1594,9 @@ async function startJob(form) {
     }
     if (codexResult.tokenUsage?.grossAgents && typeof codexResult.tokenUsage.grossAgents === "object") {
       jobTokenUsage.grossAgents = { ...codexResult.tokenUsage.grossAgents };
+    }
+    if (codexResult.tokenUsage?.researchOptimization && typeof codexResult.tokenUsage.researchOptimization === "object") {
+      jobTokenUsage.researchOptimization = codexResult.tokenUsage.researchOptimization;
     }
     jobTokenUsage.diagnostics = buildJobTokenDiagnostics(jobTokenUsage);
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
