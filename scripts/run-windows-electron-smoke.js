@@ -11,7 +11,9 @@ const afterSetup = `    // The app's default 1440x920 window can legitimately fi
 const beforeAssertion = `    const imagePanelScrollable = await window.locator(".image-panel").evaluate((element) => (\n      element.scrollHeight > element.clientHeight\n    ));\n    if (!imagePanelScrollable) {\n      throw new Error("Image preview panel is not scrollable with many images.");\n    }`;
 const afterAssertion = `    const imagePanelScrollState = await window.locator(".image-panel").evaluate((element) => {\n      const style = window.getComputedStyle(element);\n      return {\n        overflowY: style.overflowY,\n        hasOverflow: element.scrollHeight > element.clientHeight\n      };\n    });\n    if (!["auto", "scroll"].includes(imagePanelScrollState.overflowY) || !imagePanelScrollState.hasOverflow) {\n      throw new Error(\`Image preview panel cannot scroll at minimum window size: \${JSON.stringify(imagePanelScrollState)}\`);\n    }`;
 
-let source = fs.readFileSync(sourcePath, "utf8");
+// GitHub's Windows runner may check text files out with CRLF. Normalize only the
+// temporary test copy so anchors and behavior remain platform-independent.
+let source = fs.readFileSync(sourcePath, "utf8").replace(/\r\n/g, "\n");
 if (!source.includes(beforeSetup)) {
   throw new Error("Windows smoke patch anchor missing: image setup");
 }
