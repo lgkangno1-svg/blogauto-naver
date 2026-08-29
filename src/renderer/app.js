@@ -9,6 +9,8 @@ const state = {
   saveTimer: null,
   autoDelayWake: null,
   tokenTotal: 0,
+  tokenGrossTotal: 0,
+  tokenSavedTotal: 0,
   codexRateLimits: null,
   chrome: { available: true, path: "" },
   accountStore: { selectedAccountId: "", accounts: [] },
@@ -125,6 +127,7 @@ function setRunState(status, detail = "") {
     codex_usage_limit: "danger",
     codex_exec_failed: "danger",
     session_expired: "danger",
+    publish_uncertain: "warning",
     duplicate_retry: "warning",
     publishing: "info",
     generating: "info"
@@ -136,6 +139,7 @@ function setRunState(status, detail = "") {
     codex_usage_limit: "한도초과",
     codex_exec_failed: "Codex실패",
     session_expired: "세션만료",
+    publish_uncertain: "발행확인필요",
     duplicate_retry: "중복",
     publishing: "발행",
     generating: "생성중"
@@ -168,7 +172,7 @@ function addLog(payload) {
 
 function shouldRetryAutoResult(result) {
   const status = String(result?.status || "").toLowerCase();
-  return !["success", "generated", "codex_usage_limit", "codex_exec_failed", "session_expired"].includes(status);
+  return !["success", "generated", "publish_uncertain", "codex_usage_limit", "codex_exec_failed", "session_expired"].includes(status);
 }
 
 function autoAttemptLimitForResult(result) {
@@ -214,6 +218,50 @@ function formatTokens(total) {
 function setTokenTotal(total) {
   state.tokenTotal = Number(total || 0);
   $("#tokenBadge").textContent = `누적 ${formatTokens(state.tokenTotal)}`;
+}
+
+function setTokenUsage(payload = {}) {
+  const total = Number(payload.total || 0);
+  const gross = Math.max(total, Number(payload.grossTotal || total || 0));
+  const saved = Math.max(0, Number(payload.cachedOrSavedTokens ?? (gross - total)));
+  const savingsPercent = Number.isFinite(Number(payload.savingsPercent))
+    ? Number(payload.savingsPercent)
+    : (gross > 0 ? ((saved / gross) * 100) : 0);
+  state.tokenGrossTotal = gross;
+  state.tokenSavedTotal = saved;
+  setTokenTotal(total);
+  const badge = $("#tokenSavingsBadge");
+  if (badge) badge.textContent = `캐시/절감 ${Math.round(savingsPercent * 10) / 10}% · ${saved.toLocaleString()}`;
+}
+
+function renderJobDiagnostics(tokenUsage = {}) {
+  const diagnostics = tokenUsage?.diagnostics || {};
+  const total = Number(diagnostics.total ?? tokenUsage.total ?? 0);
+  const gross = Math.max(total, Number(diagnostics.grossTotal ?? tokenUsage.grossTotal ?? total));
+  const saved = Math.max(0, Number(diagnostics.savedTokens ?? (gross - total)));
+  const savingsPercent = Number.isFinite(Number(diagnostics.savingsPercent))
+    ? Number(diagnostics.savingsPercent)
+    : (gross > 0 ? (saved / gross) * 100 : 0);
+  const summary = $("#tokenDiagnosticsSummary");
+  if (summary) {
+    const biggest = diagnostics.largestAgent?.agent
+      ? ` · 최대 사용 ${diagnostics.largestAgent.agent} ${Number(diagnostics.largestAgent.sharePercent || 0)}%`
+      : "";
+    summary.innerHTML = `<strong>실사용 ${total.toLocaleString()}</strong> · 총입력기준 ${gross.toLocaleString()} · 절감 ${saved.toLocaleString()} (${Math.round(savingsPercent * 10) / 10}%)${biggest}`;
+  }
+  const breakdown = $("#agentTokenBreakdown");
+  if (!breakdown) return;
+  const rows = Array.isArray(diagnostics.agentRows) ? diagnostics.agentRows : [];
+  if (!rows.length) {
+    breakdown.innerHTML = '<span class="hint">Agent별 집계 대기 중</span>';
+    return;
+  }
+  breakdown.innerHTML = rows.map((row) => {
+    const effective = Number(row.effective || 0).toLocaleString();
+    const grossAgent = Number(row.gross || row.effective || 0).toLocaleString();
+    const savedAgent = Number(row.saved || 0).toLocaleString();
+    return `<div><strong>${row.agent}</strong> · 실사용 ${effective} / 총 ${grossAgent} / 절감 ${savedAgent} · 비중 ${Number(row.sharePercent || 0)}%</div>`;
+  }).join("");
 }
 
 function formatPercent(value) {
@@ -289,6 +337,7 @@ function statusBadge(status) {
     codex_usage_limit: "한도초과",
     codex_exec_failed: "Codex실패",
     session_expired: "세션만료",
+    publish_uncertain: "확인필요",
     duplicate_retry: "중복",
     publishing: "발행",
     generating: "생성중"
@@ -539,6 +588,32 @@ async function refreshCodexUsageOnStartup() {
   }
 }
 
+function renderTokenHistoryBaseline(history = []) {
+  const target = $("#tokenHistoryBaseline");
+  if (!target) return;
+  const rows = (Array.isArray(history) ? history : [])
+    .filter((item) => Number(item?.token_total || 0) > 0)
+    .slice(0, 20);
+  if (!rows.length) {
+    target.innerHTML = '<span class="hint">최근 작업 토큰 기준선은 작업 이력에 쌓인 뒤 표시됩니다.</span>';
+    return;
+  }
+  const average = Math.round(rows.reduce((sum, item) => sum + Number(item.token_total || 0), 0) / rows.length);
+  const gross = Math.round(rows.reduce((sum, item) => sum + Math.max(Number(item.token_total || 0), Number(item.token_gross_total || 0)), 0) / rows.length);
+  const saved = Math.round(rows.reduce((sum, item) => sum + Number(item.token_saved || 0), 0) / rows.length);
+  const savings = gross > 0 ? Math.round((saved / gross) * 1000) / 10 : 0;
+  const latest = Number(rows[0]?.token_total || 0);
+  const previous = rows.slice(1);
+  const previousAverage = previous.length
+    ? Math.round(previous.reduce((sum, item) => sum + Number(item.token_total || 0), 0) / previous.length)
+    : 0;
+  const delta = previousAverage > 0 ? Math.round(((latest - previousAverage) / previousAverage) * 1000) / 10 : 0;
+  const anomaly = previous.length >= 3 && delta >= 50;
+  const largestAgent = rows.map((item) => String(item.token_largest_agent || "")).find(Boolean) || "-";
+  target.innerHTML = `<div><strong>최근 ${rows.length}건 평균 ${average.toLocaleString()} tokens</strong> · 평균 절감 ${saved.toLocaleString()} (${savings}%) · 최근 최대 Agent ${escapeHtml(largestAgent)}</div>`
+    + (previousAverage ? `<div class="${anomaly ? "note warn" : "hint"}">최근 작업은 이전 평균 대비 ${delta >= 0 ? "+" : ""}${delta}%${anomaly ? " — 토큰 급증 확인 필요" : ""}</div>` : "");
+}
+
 function renderHistory(history) {
   const body = $("#historyBody");
   const summary = $("#historySummary");
@@ -547,6 +622,7 @@ function renderHistory(history) {
 
   if (modal) modal.hidden = !state.historyModalOpen;
   if (summary) summary.innerHTML = renderHistorySummary(items);
+  renderTokenHistoryBaseline(items);
 
   body.innerHTML = "";
   if (items.length === 0) {
@@ -572,6 +648,9 @@ function renderHistory(history) {
       ["검색어", item.search_query || item.query],
       ["Research 제목", item.research_title],
       ["검토 결과", item.final_verdict],
+      ["토큰 총사용", item.token_gross_total ? formatTokens(item.token_gross_total) : ""],
+      ["토큰 절감", item.token_saved ? `${formatTokens(item.token_saved)} (${Number(item.token_savings_percent || 0)}%)` : ""],
+      ["최대 사용 Agent", item.token_largest_agent],
       ["실패 단계", item.failure_phase],
       ["근거 요약", item.source_summary],
       ["사유", item.reason]
@@ -1166,6 +1245,7 @@ function collectForm(target = {}) {
     trustBlogAsSource: category?.trustBlogAsSource === true,
     codexCmdPath: "codex.cmd",
     codexModel: normalizeCodexModel($("#codexModel")?.value),
+    tokenEfficiencyMode: $("#tokenEfficiencyMode")?.value || "balanced",
     primarySearchProvider: searchProviders.primarySearchProvider,
     fallbackSearchProvider: searchProviders.fallbackSearchProvider,
     naverSearchUrl: DEFAULT_NAVER_SEARCH_URL,
@@ -1198,7 +1278,8 @@ function applySettings(settings) {
     publishVisibility: "#publishVisibility",
     publishScheduleMode: "#publishScheduleMode",
     reserveAfterHours: "#reserveAfterHours",
-    maxBodyImages: "#maxBodyImages"
+    maxBodyImages: "#maxBodyImages",
+    tokenEfficiencyMode: "#tokenEfficiencyMode"
   };
   for (const [key, selector] of Object.entries(map)) {
     if (settings[key] !== undefined && $(selector)) {
@@ -1248,6 +1329,7 @@ async function saveSettingsNow() {
     maxBodyImages: form.maxBodyImages,
     breakSentencesInBody: form.breakSentencesInBody,
     codexModel: form.codexModel,
+    tokenEfficiencyMode: form.tokenEfficiencyMode,
     agentModels: form.agentModels
   });
   await saveAccountStoreNow();
@@ -1585,7 +1667,8 @@ async function startManualJob() {
   $("#startButton").disabled = true;
   setTistoryTestButtonDisabled(true);
   await saveSettingsNow();
-  setTokenTotal(0);
+  setTokenUsage({ total: 0, grossTotal: 0 });
+  renderJobDiagnostics({ total: 0, grossTotal: 0 });
   $("#articlePreview").value = "";
   $("#selectedTitle").textContent = "아직 선정 전";
   renderImages([]);
@@ -1664,14 +1747,18 @@ async function boot() {
     setRunState(payload.status, payload.detail || payload.status);
   });
   window.blogAuto.onTokens((payload) => {
-    setTokenTotal(payload.total || 0);
+    setTokenUsage(payload);
+    renderJobDiagnostics(payload);
     if (payload.rateLimits) setCodexRateLimits(payload.rateLimits);
   });
   window.blogAuto.onPreview((payload) => {
     $("#articlePreview").value = payload.article || "";
     $("#articleMeta").textContent = payload.title || "본문 생성 완료";
     if (payload.title) $("#selectedTitle").textContent = payload.title;
-    if (payload.tokenUsage) setTokenTotal(payload.tokenUsage.total || 0);
+    if (payload.tokenUsage) {
+      setTokenUsage(payload.tokenUsage);
+      renderJobDiagnostics(payload.tokenUsage);
+    }
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
     renderImageNotes(payload.imageNotes || []);
@@ -1690,7 +1777,7 @@ async function boot() {
     $("#articlePreview").value = payload.article || $("#articlePreview").value;
     $("#articleMeta").textContent = payload.title || payload.status || "완료";
     if (payload.title) $("#selectedTitle").textContent = payload.title;
-    if (payload.tokenUsage) setTokenTotal(payload.tokenUsage.total || 0);
+    if (payload.tokenUsage) setTokenUsage(payload.tokenUsage);
     if (payload.tokenUsage?.rateLimits) setCodexRateLimits(payload.tokenUsage.rateLimits);
     renderImages(payload.images || []);
     renderImageNotes(payload.imageNotes || []);

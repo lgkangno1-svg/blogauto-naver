@@ -1,0 +1,39 @@
+name: Dependency Security Audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - upgrade/best-of-v2
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/dependency-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: upgrade/best-of-v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Print full dependency audit without failing on build-tool findings
+        if: always()
+        shell: bash
+        run: npm audit || true

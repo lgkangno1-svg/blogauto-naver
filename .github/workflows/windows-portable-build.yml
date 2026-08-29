@@ -1,0 +1,78 @@
+name: V2 Windows Portable Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - upgrade/best-of-v2
+    paths:
+      - "src/**"
+      - "runtime-template/**"
+      - "scripts/prepare-dist-runtime.js"
+      - "scripts/check-v2-publish-safety-behavior.js"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/windows-portable-build.yml"
+
+concurrency:
+  group: v2-windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: upgrade/best-of-v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run repository checks
+        run: npm run check
+
+      - name: Run publish safety behavioral checks
+        run: node scripts/check-v2-publish-safety-behavior.js
+
+      - name: Build Windows portable app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist
+
+      - name: Verify distributable contents
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist -Filter 'Naver-Blog-Automator-*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Portable EXE was not generated.' }
+          if ($exe.Length -lt 1000000) { throw "Portable EXE is unexpectedly small: $($exe.Length)" }
+          $required = @(
+            'dist/runtime/user-settings.json',
+            'dist/runtime/account-categories.json',
+            'dist/runtime/blog_history.jsonl',
+            'dist/runtime/image',
+            'dist/runtime/jobs'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing distributable runtime path: $path" }
+          }
+          Write-Host "Verified portable EXE: $($exe.Name) ($($exe.Length) bytes)"
+
+      - name: Upload portable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Naver-Blog-Automator-Windows-Portable
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/Naver-Blog-Automator-*.exe
+            dist/runtime/**

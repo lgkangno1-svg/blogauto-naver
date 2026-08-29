@@ -1,0 +1,63 @@
+name: V2 Image Panel Scroll
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - upgrade/best-of-v2
+    paths:
+      - "scripts/apply-v2-image-panel-scroll.js"
+      - "scripts/check-v2-image-panel-scroll.js"
+      - ".github/workflows/v2-image-panel-scroll.yml"
+
+concurrency:
+  group: v2-image-panel-scroll-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: upgrade/best-of-v2
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply image panel scroll fix
+        run: node scripts/apply-v2-image-panel-scroll.js
+
+      - name: Check image panel scroll CSS
+        run: node scripts/check-v2-image-panel-scroll.js
+
+      - name: Run repository checks
+        run: npm run check
+
+      - name: Run Electron smoke
+        env:
+          BLOGAUTO_SKIP_CODEX_USAGE_REFRESH: "1"
+        run: node scripts/smoke-electron.js
+
+      - name: Commit verified CSS integration
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Image panel scroll fix already integrated"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/renderer/styles.css
+          git commit -m "fix: preserve image grid height for panel scrolling"
+          git push origin HEAD:upgrade/best-of-v2

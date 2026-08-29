@@ -10,6 +10,8 @@ const { collectSearchResults, summarizeSourceQuality } = require("./lib/search")
 const { runCodexGeneration, fetchCodexUsageSnapshot } = require("./lib/codexRunner");
 const { normalizeAgentResult, getPreviewImages } = require("./lib/imageAssets");
 const { publishToNaver, checkNaverSession, verifyOpenNaverSession } = require("./lib/naverPublisher");
+const { publishStatusFromError } = require("./lib/publishSafety");
+const { buildJobTokenDiagnostics, historyTokenFields } = require("./lib/jobDiagnostics");
 const { publishToTistory, checkTistorySession } = require("./lib/tistoryPublisher");
 const { ensureSettingsFile, normalizeCodexModel, normalizeImageAspectRatio, resolveCodexCmdPath, readSettings, writeSettings } = require("./lib/settings");
 const {
@@ -1149,6 +1151,10 @@ async function startJob(form) {
     inputTokens: 0,
     cachedInputTokens: 0,
     outputTokens: 0,
+    agents: {},
+    grossAgents: {},
+    researchOptimization: null,
+    diagnostics: buildJobTokenDiagnostics({}),
     rateLimits: null
   };
   writeSettings(runtimeRoot, {
@@ -1317,15 +1323,27 @@ async function startJob(form) {
       });
       return { status: "success", resumedPendingPublish: true };
     } catch (error) {
+      const resumeFailedStatus = publishStatusFromError(error);
       if (error.code === "SESSION_EXPIRED" && account.id) {
         updateAccountSession(runtimeRoot, account.id, "expired", settings);
         emitAccountStore(runtimeRoot);
       }
+      if (resumeFailedStatus === "publish_uncertain") {
+        writeSettings(runtimeRoot, {
+          pendingNaverPublishDraft: {
+            ...pendingDraft,
+            status: "publish_uncertain",
+            uncertainAt: new Date().toISOString(),
+            uncertainReason: error.message
+          }
+        });
+        safeLog(jobId, "발행 결과가 불확실하여 보류 draft를 자동 재발행 대상에서 제외했습니다. 블로그 목록을 수동 확인해 주세요.", "warn");
+      }
       safeLog(jobId, error.message, "error");
-      updateStatus(jobId, error.code === "SESSION_EXPIRED" ? "session_expired" : "failed", error.message);
+      updateStatus(jobId, resumeFailedStatus, error.message);
       emit("job:complete", {
         ...nonSensitiveJob,
-        status: error.code === "SESSION_EXPIRED" ? "session_expired" : "failed",
+        status: resumeFailedStatus,
         title: resumeAgentResult.title,
         article: resumeAgentResult.article,
         images: getPreviewImages(resumeAgentResult),
@@ -1334,7 +1352,7 @@ async function startJob(form) {
         history: readHistory(runtimeRoot)
       });
       return {
-        status: error.code === "SESSION_EXPIRED" ? "session_expired" : "failed",
+        status: resumeFailedStatus,
         reason: error.message,
         resumedPendingPublish: true
       };
@@ -1444,9 +1462,24 @@ async function startJob(form) {
           jobTokenUsage.inputTokens = Number(usage.inputTokens || 0);
           jobTokenUsage.cachedInputTokens = Number(usage.cachedInputTokens || 0);
           jobTokenUsage.outputTokens = Number(usage.outputTokens || 0);
+          if (usage.researchOptimization && typeof usage.researchOptimization === "object") {
+            jobTokenUsage.researchOptimization = usage.researchOptimization;
+          }
           if (usage.rateLimits) {
             jobTokenUsage.rateLimits = usage.rateLimits;
           }
+          const usageAgent = String(usage.agent || "").trim();
+          if (usageAgent) {
+            const agentTotal = Number(usage.agentTotal || 0);
+            if (Number.isFinite(agentTotal) && agentTotal >= 0) {
+              jobTokenUsage.agents[usageAgent] = agentTotal;
+            }
+            const grossDelta = Math.max(0, Number(usage.agentGrossDelta || 0));
+            if (grossDelta) {
+              jobTokenUsage.grossAgents[usageAgent] = Number(jobTokenUsage.grossAgents[usageAgent] || 0) + grossDelta;
+            }
+          }
+          jobTokenUsage.diagnostics = buildJobTokenDiagnostics(jobTokenUsage);
           emit("job:tokens", {
             jobId,
             total: jobTokenUsage.total,
@@ -1459,6 +1492,9 @@ async function startJob(form) {
             agentTotal: Number(usage.agentTotal || 0),
             agentDelta: Number(usage.agentDelta || 0),
             agentGrossDelta: Number(usage.agentGrossDelta || 0),
+            agents: { ...jobTokenUsage.agents },
+            grossAgents: { ...jobTokenUsage.grossAgents },
+            diagnostics: jobTokenUsage.diagnostics,
             final: usage.final === true,
             at: new Date().toISOString()
           });
@@ -1496,6 +1532,7 @@ async function startJob(form) {
             ...(Array.isArray(researchResult.uncertainItems) ? researchResult.uncertainItems : [])
           ].filter(Boolean).join(" ");
           const searchResults = await collectSearchResults({
+            runtimeRoot,
             topic: searchTopic,
             keyword: searchKeyword,
             category,
@@ -1552,6 +1589,16 @@ async function startJob(form) {
     if (codexResult.tokenUsage?.rateLimits) {
       jobTokenUsage.rateLimits = codexResult.tokenUsage.rateLimits;
     }
+    if (codexResult.tokenUsage?.agents && typeof codexResult.tokenUsage.agents === "object") {
+      jobTokenUsage.agents = { ...codexResult.tokenUsage.agents };
+    }
+    if (codexResult.tokenUsage?.grossAgents && typeof codexResult.tokenUsage.grossAgents === "object") {
+      jobTokenUsage.grossAgents = { ...codexResult.tokenUsage.grossAgents };
+    }
+    if (codexResult.tokenUsage?.researchOptimization && typeof codexResult.tokenUsage.researchOptimization === "object") {
+      jobTokenUsage.researchOptimization = codexResult.tokenUsage.researchOptimization;
+    }
+    jobTokenUsage.diagnostics = buildJobTokenDiagnostics(jobTokenUsage);
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
     const sourceFailureReason = detectCodexSourceFailure(codexResult);
     if (sourceFailureReason) {
@@ -1605,7 +1652,7 @@ async function startJob(form) {
         research_title: researchTitleResult.finalTitle || researchTitleResult.selectedTitle || "",
         embedding_model: "local-hash-v1",
         embedding,
-        token_total: jobTokenUsage.total,
+        ...historyTokenFields(jobTokenUsage),
         reason: `기존 제목과 cosine similarity ${maxSimilarity.toFixed(3)}`
       };
       appendHistory(runtimeRoot, duplicateEntry);
@@ -1738,7 +1785,7 @@ async function startJob(form) {
       source_summary: researchTitleResult.searchFlowSummary || "",
       embedding_model: "local-hash-v1",
       embedding,
-      token_total: jobTokenUsage.total,
+      ...historyTokenFields(jobTokenUsage),
       reason: publishReason
     };
     appendHistory(runtimeRoot, entry);
@@ -1759,11 +1806,13 @@ async function startJob(form) {
     });
     return { status: publishStatus, keywordLane: keywordLaneResultPayload(latestLaneResult) };
   } catch (error) {
-    const failedStatus = error.code === "SESSION_EXPIRED"
-      ? "session_expired"
-      : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"
-        : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"
-          : "failed";
+    const failedStatus = error.code === "NAVER_PUBLISH_UNCERTAIN"
+      ? "publish_uncertain"
+      : error.code === "SESSION_EXPIRED"
+        ? "session_expired"
+        : error.code === "CODEX_USAGE_LIMIT" ? "codex_usage_limit"
+          : error.code === "CODEX_EXEC_FAILED" ? "codex_exec_failed"
+            : "failed";
     persistCodexRateLimits(runtimeRoot, jobTokenUsage.rateLimits);
     if (failedStatus === "session_expired" && account.id) {
       updateAccountSession(runtimeRoot, account.id, "expired", settings);
@@ -1807,7 +1856,7 @@ async function startJob(form) {
       status: failedStatus,
       embedding_model: "local-hash-v1",
       embedding,
-      token_total: jobTokenUsage.total,
+      ...historyTokenFields(jobTokenUsage),
       failure_phase: error.failurePhase || "",
       research_title: latestResearchTitleResult?.finalTitle || latestResearchTitleResult?.selectedTitle || "",
       reason: error.message

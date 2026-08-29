@@ -1,0 +1,209 @@
+name: V2 Core Upgrade
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - upgrade/best-of-v2
+    paths:
+      - "src/lib/qualityGate.js"
+      - "src/lib/tokenPolicy.js"
+      - "src/lib/evidenceLedger.js"
+      - "src/lib/publishSafety.js"
+      - "src/lib/partialRepair.js"
+      - "src/lib/titleNovelty.js"
+      - "src/lib/sourceCache.js"
+      - "src/lib/researchArtifactCache.js"
+      - "src/lib/contractPolicy.js"
+      - "src/lib/jobDiagnostics.js"
+      - "src/lib/adaptiveReasoning.js"
+      - "src/lib/researchPreflight.js"
+      - "scripts/apply-v2-core.js"
+      - "scripts/apply-v2-ui.js"
+      - "scripts/apply-v2-publish-safety.js"
+      - "scripts/apply-v2-partial-repair.js"
+      - "scripts/apply-v2-early-title-gate.js"
+      - "scripts/apply-v2-source-cache.js"
+      - "scripts/apply-v2-research-artifact-cache.js"
+      - "scripts/apply-v2-adaptive-contract.js"
+      - "scripts/apply-v2-job-diagnostics.js"
+      - "scripts/apply-v2-history-diagnostics.js"
+      - "scripts/apply-v2-adaptive-reasoning.js"
+      - "scripts/apply-v2-research-preflight.js"
+      - "scripts/check-v2.js"
+      - "scripts/check-v2-early-title-gate.js"
+      - "scripts/check-v2-source-cache.js"
+      - "scripts/check-v2-research-artifact-cache.js"
+      - "scripts/check-v2-publish-safety-behavior.js"
+      - "scripts/check-v2-adaptive-contract.js"
+      - "scripts/check-v2-job-diagnostics.js"
+      - "scripts/check-v2-history-diagnostics.js"
+      - "scripts/check-v2-adaptive-reasoning.js"
+      - "scripts/check-v2-research-preflight.js"
+      - ".github/workflows/v2-core-upgrade.yml"
+
+concurrency:
+  group: v2-core-upgrade-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: upgrade/best-of-v2
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply core patch and verify
+        run: |
+          node scripts/apply-v2-core.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply UI patch and verify
+        run: |
+          node scripts/apply-v2-ui.js
+          node --check src/lib/settings.js
+          node --check src/renderer/app.js
+
+      - name: Apply publish safety patch and verify
+        run: |
+          node scripts/apply-v2-publish-safety.js
+          node --check src/lib/naverPublisher.js
+          node --check src/main.js
+          node --check src/renderer/app.js
+
+      - name: Apply partial repair patch and verify
+        run: |
+          node scripts/apply-v2-partial-repair.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply early title gate and verify
+        run: |
+          node scripts/apply-v2-early-title-gate.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply adaptive Writer Contract policy and verify
+        run: |
+          node scripts/apply-v2-adaptive-contract.js
+          node --check src/lib/contractPolicy.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply freshness-aware source cache and verify
+        run: |
+          node scripts/apply-v2-source-cache.js
+          node --check src/lib/sourceCache.js
+          node --check src/lib/search.js
+          node --check src/main.js
+
+      - name: Apply deterministic Research preflight and verify
+        run: |
+          node scripts/apply-v2-research-preflight.js
+          node --check src/lib/researchPreflight.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply per-job token diagnostics and verify
+        run: |
+          if grep -q 'jobTokenUsage.diagnostics' src/main.js \
+            && grep -q 'id="tokenDiagnosticsSummary"' src/renderer/index.html \
+            && grep -q 'function renderJobDiagnostics' src/renderer/app.js; then
+            echo "Per-job token diagnostics already integrated"
+          else
+            node scripts/apply-v2-job-diagnostics.js
+          fi
+          node --check src/lib/jobDiagnostics.js
+          node --check src/main.js
+          node --check src/renderer/app.js
+
+      - name: Apply durable token history diagnostics and verify
+        run: |
+          node scripts/apply-v2-history-diagnostics.js
+          node --check src/lib/jobDiagnostics.js
+          node --check src/main.js
+          node --check src/renderer/app.js
+
+      - name: Apply conservative adaptive reasoning and verify
+        run: |
+          node scripts/apply-v2-adaptive-reasoning.js
+          node --check src/lib/adaptiveReasoning.js
+          node --check src/lib/codexRunner.js
+
+      - name: Apply Research artifact cache and measured skip diagnostics
+        run: |
+          node scripts/apply-v2-research-artifact-cache.js
+          node --check src/lib/researchArtifactCache.js
+          node --check src/lib/codexRunner.js
+          node --check src/lib/jobDiagnostics.js
+          node --check src/main.js
+
+      - name: Syntax check V2 policy modules
+        run: |
+          node --check src/lib/qualityGate.js
+          node --check src/lib/tokenPolicy.js
+          node --check src/lib/evidenceLedger.js
+          node --check src/lib/publishSafety.js
+          node --check src/lib/partialRepair.js
+          node --check src/lib/titleNovelty.js
+          node --check src/lib/sourceCache.js
+          node --check src/lib/researchArtifactCache.js
+          node --check src/lib/contractPolicy.js
+          node --check src/lib/jobDiagnostics.js
+          node --check src/lib/adaptiveReasoning.js
+          node --check src/lib/researchPreflight.js
+
+      - name: Check V2 core quality and token policies
+        run: node scripts/check-v2.js
+
+      - name: Check V2 early title gate
+        run: node scripts/check-v2-early-title-gate.js
+
+      - name: Check V2 source cache
+        run: node scripts/check-v2-source-cache.js
+
+      - name: Check V2 Research artifact cache
+        run: node scripts/check-v2-research-artifact-cache.js
+
+      - name: Check V2 publish safety behavior
+        run: node scripts/check-v2-publish-safety-behavior.js
+
+      - name: Check V2 adaptive Writer Contract
+        run: node scripts/check-v2-adaptive-contract.js
+
+      - name: Check V2 per-job diagnostics
+        run: node scripts/check-v2-job-diagnostics.js
+
+      - name: Check V2 durable history diagnostics
+        run: node scripts/check-v2-history-diagnostics.js
+
+      - name: Check V2 adaptive reasoning
+        run: node scripts/check-v2-adaptive-reasoning.js
+
+      - name: Check V2 deterministic Research preflight
+        run: node scripts/check-v2-research-preflight.js
+
+      - name: Run repository checks
+        run: npm run check
+
+      - name: Commit generated V2 integration
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No generated patch changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/codexRunner.js src/lib/naverPublisher.js src/lib/settings.js src/lib/search.js src/lib/jobDiagnostics.js src/main.js src/renderer/index.html src/renderer/app.js
+          git commit -m "feat: integrate V2 Research artifact cache"
+          git push origin HEAD:upgrade/best-of-v2

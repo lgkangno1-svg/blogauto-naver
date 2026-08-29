@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS = {
     image: "medium"
   },
   codexRateLimits: null,
+  tokenEfficiencyMode: "balanced",
   agentHarnessMode: "lean"
 };
 

@@ -2,6 +2,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
+const { evaluateArticleQuality } = require("./qualityGate");
+const { evaluateTitleNovelty } = require("./titleNovelty");
+const { shouldRefineWriterContract } = require("./contractPolicy");
+const { chooseAdaptiveAgentModels } = require("./adaptiveReasoning");
+const { deterministicSearchPreflight, buildPreflightResearchRequest } = require("./researchPreflight");
+const { readResearchArtifactCache, writeResearchArtifactCache } = require("./researchArtifactCache");
+const { readHistory } = require("./history");
+const { adaptiveEffort, tokenSavings } = require("./tokenPolicy");
+const { buildEvidenceLedger, compactResearchHandoff } = require("./evidenceLedger");
+const { planPartialRepair, buildPartialRepairPrompt, mergePartialRepairResult, partialRepairEffort } = require("./partialRepair");
 
 const DEFAULT_AGENT_MODELS = {
   main: "high",
@@ -778,12 +788,14 @@ function buildPrompt({
     researchSearchNeed === "skip"
       ? "Research/Title Agent judged that external search can be skipped. Use the Writer Contract as the writing boundary, avoid current/date-bound claims, and do not invent specific facts."
       : "Use the extracted source candidates below as the factual basis. Each candidate may include title, url, fetchedUrl, excerpt, contentLength, and relevance.",
-    JSON.stringify(compactSearchResultsForPrompt(searchResults, {
-      maxResults: 8,
-      excerptChars: 700
+    JSON.stringify(buildEvidenceLedger(searchResults, {
+      topic,
+      keyword,
+      maxSources: 8,
+      maxEvidenceChars: 360
     }), null, 2),
-    researchTitleResult ? "Full Research/Title handoff for factual support only:" : "",
-    researchTitleResult ? JSON.stringify(researchTitleResult, null, 2) : "",
+    researchTitleResult ? "Compact Research/Title handoff for factual support only:" : "",
+    researchTitleResult ? JSON.stringify(compactResearchHandoff(researchTitleResult), null, 2) : "",
     "",
     "Source quality summary:",
     JSON.stringify(sourceQuality || { status: "unknown" }, null, 2),
@@ -795,7 +807,7 @@ function buildPrompt({
     "- Failure is a normal valid output. If you cannot support the post from extracted excerpts, you must set status to \"failed\". Do not try to be helpful by writing a caveat-filled article.",
     "",
     "Existing titles for duplicate awareness:",
-    JSON.stringify(historyTitles.slice(0, 80), null, 2),
+    JSON.stringify(historyTitles.slice(0, 30), null, 2),
     "",
     "Required output:",
     "- Write a JSON file at the exact Output JSON path.",
@@ -1095,7 +1107,7 @@ function buildMainReviewPrompt({
     "- Return BLOCK if facts are insufficient, sources conflict, official/current evidence is missing, the article is unsupported, the direct topic changed, or publishing could mislead readers.",
     "",
     "Research/Title Agent result:",
-    JSON.stringify(researchTitleResult || {}, null, 2),
+    JSON.stringify(compactResearchHandoff(researchTitleResult || {}), null, 2),
     "",
     "Writer Agent result:",
     JSON.stringify(writerResult || {}, null, 2),
@@ -1144,7 +1156,7 @@ function buildWriterContractRefinementPrompt({
     JSON.stringify(draftWriterContract || {}, null, 2),
     "",
     "Research/Title Agent result:",
-    JSON.stringify(researchTitleResult || {}, null, 2),
+    JSON.stringify(compactResearchHandoff(researchTitleResult || {}), null, 2),
     "",
     "Source quality summary:",
     JSON.stringify(sourceQuality || { status: "unknown" }, null, 2),
@@ -1709,7 +1721,7 @@ async function runCodexTask({
     lastOutputTokens: 0,
     rateLimits: null
   };
-  let taskEffort = modelEffortForAgent(options, agent);
+  let taskEffort = adaptiveEffort(options, agent, modelEffortForAgent(options, agent));
   let finalTokenUsageLogged = false;
   let taskStartedAt = Date.now();
 
@@ -2112,18 +2124,43 @@ async function runCodexGeneration(options, log = () => {}) {
   let totalTokens = 0;
   let totalGrossTokens = 0;
   let latestRateLimits = null;
+  const researchOptimization = {
+    preflight: {
+      applied: false,
+      searchMode: "",
+      reason: "",
+      codexDecisionCallSkipped: false
+    },
+    artifactCache: {
+      eligible: false,
+      hit: false,
+      reason: "not_checked",
+      codexResearchCallSkipped: false,
+      stored: false,
+      sourceSetHash: ""
+    }
+  };
   const rememberRateLimits = (result) => {
     if (result?.tokenUsage?.rateLimits) {
       latestRateLimits = result.tokenUsage.rateLimits;
     }
   };
-  const tokenUsageSnapshot = () => ({
-    total: totalTokens,
-    grossTotal: totalGrossTokens,
-    rateLimits: latestRateLimits,
-    agents: { ...agentTokenTotals },
-    grossAgents: { ...agentGrossTokenTotals }
-  });
+  const tokenUsageSnapshot = () => {
+    const savings = tokenSavings(totalGrossTokens, totalTokens);
+    return {
+      total: totalTokens,
+      grossTotal: totalGrossTokens,
+      rateLimits: latestRateLimits,
+      agents: { ...agentTokenTotals },
+      grossAgents: { ...agentGrossTokenTotals },
+      adaptiveReasoning: effectiveOptions.adaptiveReasoning || null,
+      researchOptimization: {
+        preflight: { ...researchOptimization.preflight },
+        artifactCache: { ...researchOptimization.artifactCache }
+      },
+      ...savings
+    };
+  };
 
   const accountImageStyle = effectiveOptions.accountImageStyle || {};
   const sampleImagePath = String(accountImageStyle.sampleImagePath || "").trim();
@@ -2185,14 +2222,96 @@ async function runCodexGeneration(options, log = () => {}) {
     accountImageStylePrompt
   };
 
-  let researchResult = await runCodexTask({
-    options: effectiveOptions,
-    prompt: buildResearchTitlePrompt(effectiveOptions),
-    promptFileName: "research-title-prompt.txt",
-    resultFileName: "research-title-result.json",
-    log,
-    agent: "research"
+  let researchSearchRound = 0;
+  const researchPreflight = deterministicSearchPreflight(effectiveOptions);
+  researchOptimization.preflight.searchMode = String(researchPreflight.searchNeed || "");
+  researchOptimization.preflight.reason = Array.isArray(researchPreflight.reasons)
+    ? researchPreflight.reasons.join(",")
+    : "";
+  if (
+    researchPreflight.shouldSearchFirst
+    && effectiveOptions.searchResults.length === 0
+    && typeof options.onSearchNeeded === "function"
+  ) {
+    log(
+      `토큰 최적화: 첫 Research 검색판정 호출을 생략하고 자료를 먼저 수집합니다. (${researchPreflight.searchNeed}: ${researchPreflight.reasons.join(", ")})`,
+      "info",
+      "research"
+    );
+    researchOptimization.preflight.applied = true;
+    researchOptimization.preflight.codexDecisionCallSkipped = true;
+    const preflightRequest = buildPreflightResearchRequest(effectiveOptions, researchPreflight);
+    const searchPayload = await options.onSearchNeeded(preflightRequest, {
+      round: 1,
+      previousSearchResults: effectiveOptions.searchResults,
+      sourceQuality: effectiveOptions.sourceQuality,
+      deterministicPreflight: true
+    });
+    effectiveOptions = {
+      ...effectiveOptions,
+      searchResults: Array.isArray(searchPayload?.searchResults) ? searchPayload.searchResults : [],
+      sourceQuality: searchPayload?.sourceQuality || { status: "unknown" },
+      researchSearchPreflight: researchPreflight
+    };
+    researchSearchRound = 1;
+  }
+
+  const researchCacheClassification = () => deterministicSearchPreflight({
+    ...effectiveOptions,
+    searchResults: []
   });
+  const readCurrentResearchCache = () => {
+    const cacheRead = readResearchArtifactCache({
+      options: effectiveOptions,
+      classification: researchCacheClassification()
+    });
+    researchOptimization.artifactCache.eligible = cacheRead.eligible === true;
+    researchOptimization.artifactCache.reason = String(cacheRead.reason || "unknown");
+    researchOptimization.artifactCache.sourceSetHash = String(cacheRead.sourceFingerprint?.hash || "");
+    return cacheRead;
+  };
+  const maybeStoreResearchCache = (result) => {
+    const cacheWrite = writeResearchArtifactCache({
+      options: effectiveOptions,
+      classification: researchCacheClassification(),
+      result
+    });
+    if (cacheWrite.written) {
+      researchOptimization.artifactCache.stored = true;
+      researchOptimization.artifactCache.eligible = true;
+      researchOptimization.artifactCache.reason = "stored";
+      researchOptimization.artifactCache.sourceSetHash = String(cacheWrite.sourceFingerprint?.hash || researchOptimization.artifactCache.sourceSetHash || "");
+    } else if (researchOptimization.artifactCache.reason === "not_checked") {
+      researchOptimization.artifactCache.eligible = cacheWrite.eligible === true;
+      researchOptimization.artifactCache.reason = String(cacheWrite.reason || "not_stored");
+      researchOptimization.artifactCache.sourceSetHash = String(cacheWrite.sourceFingerprint?.hash || "");
+    }
+    return cacheWrite;
+  };
+
+  const initialResearchCache = readCurrentResearchCache();
+  let researchResult;
+  if (initialResearchCache.hit) {
+    researchOptimization.artifactCache.hit = true;
+    researchOptimization.artifactCache.codexResearchCallSkipped = true;
+    researchOptimization.artifactCache.reason = "hit";
+    researchResult = {
+      ...initialResearchCache.artifact,
+      tokenUsage: { total: 0, grossTotal: 0 },
+      researchArtifactCache: { hit: true, storedAt: initialResearchCache.storedAt || "" }
+    };
+    log("토큰 최적화: 동일 Research 근거/문맥 캐시를 재사용해 Research Codex 호출을 생략합니다.", "info", "research");
+  } else {
+    researchResult = await runCodexTask({
+      options: effectiveOptions,
+      prompt: buildResearchTitlePrompt(effectiveOptions),
+      promptFileName: "research-title-prompt.txt",
+      resultFileName: "research-title-result.json",
+      log,
+      agent: "research"
+    });
+    maybeStoreResearchCache(researchResult);
+  }
 
   totalTokens += Number(researchResult.tokenUsage?.total || 0);
   totalGrossTokens += Number(researchResult.tokenUsage?.grossTotal || researchResult.tokenUsage?.total || 0);
@@ -2209,7 +2328,6 @@ async function runCodexGeneration(options, log = () => {}) {
   const validSearchNeeds = new Set(["skip", "light", "normal", "strict"]);
   let needsSearch = ["light", "normal", "strict"].includes(requestedSearchNeed);
   const maxResearchSearchRounds = 2;
-  let researchSearchRound = 0;
   while (
     needsSearch
     && typeof options.onSearchNeeded === "function"
@@ -2248,7 +2366,18 @@ async function runCodexGeneration(options, log = () => {}) {
       searchResults: Array.isArray(searchPayload?.searchResults) ? searchPayload.searchResults : [],
       sourceQuality: searchPayload?.sourceQuality || { status: "unknown" }
     };
-    try {
+    const loopResearchCache = readCurrentResearchCache();
+    if (loopResearchCache.hit) {
+      researchOptimization.artifactCache.hit = true;
+      researchOptimization.artifactCache.codexResearchCallSkipped = true;
+      researchOptimization.artifactCache.reason = "hit";
+      researchResult = {
+        ...loopResearchCache.artifact,
+        tokenUsage: { total: 0, grossTotal: 0 },
+        researchArtifactCache: { hit: true, storedAt: loopResearchCache.storedAt || "" }
+      };
+      log("토큰 최적화: 검색 후 동일 Research 근거/문맥 캐시를 재사용해 재분석 Codex 호출을 생략합니다.", "info", "research");
+    } else try {
       researchResult = await runCodexTask({
         options: effectiveOptions,
         prompt: buildResearchTitlePrompt(effectiveOptions),
@@ -2260,6 +2389,7 @@ async function runCodexGeneration(options, log = () => {}) {
         agentTokenOffset: agentTokenTotals.research,
         agent: "research"
       });
+      maybeStoreResearchCache(researchResult);
       if (researchSearchRound > 1) {
         preserveAgentFile(
           options.jobDir,
@@ -2434,6 +2564,66 @@ async function runCodexGeneration(options, log = () => {}) {
     };
   }
 
+  const earlyTitleNovelty = evaluateTitleNovelty(finalTitle, effectiveOptions.historyTitles || [], {
+    maxTitleSimilarity: 0.72
+  });
+  if (!earlyTitleNovelty.pass) {
+    const duplicateReason = earlyTitleNovelty.reason || "최근 제목과 지나치게 유사한 제목이 선택되었습니다.";
+    log(
+      "Research/Title Agent 조기 중복 차단: " + duplicateReason + " Writer/Main/Image 호출을 생략합니다.",
+      "warn",
+      "research"
+    );
+    return {
+      status: "failed",
+      failurePhase: "duplicate",
+      failureReason: duplicateReason,
+      title: "",
+      article: "",
+      tags: [],
+      bodyImages: [],
+      titleImagePath: "",
+      notes: compactTextList([
+        duplicateReason,
+        earlyTitleNovelty.closestTitle
+          ? "가장 유사한 최근 제목: " + earlyTitleNovelty.closestTitle
+          : ""
+      ]),
+      researchTitleResult: researchResult,
+      optimization: {
+        earlyExit: "duplicate_title",
+        skippedStages: ["writer_contract", "writer", "main_review", "image"]
+      },
+      tokenUsage: tokenUsageSnapshot()
+    };
+  }
+
+  let adaptiveHistory = [];
+  try {
+    if (effectiveOptions.runtimeRoot) adaptiveHistory = readHistory(effectiveOptions.runtimeRoot);
+  } catch (error) {
+    log(`Adaptive reasoning history read skipped: ${error.message}`, "warn", "main");
+  }
+  const adaptiveReasoning = chooseAdaptiveAgentModels({
+    history: adaptiveHistory,
+    blogId: effectiveOptions.blogId || "",
+    tokenMode: effectiveOptions.tokenMode || effectiveOptions.tokenEfficiencyMode || "balanced",
+    requestedModels: effectiveOptions.agentModels,
+    topic: finalTitle || effectiveOptions.topic,
+    topicMode: effectiveOptions.topicMode,
+    freshnessLevel: effectiveOptions.freshnessLevel,
+    sourceQuality: effectiveOptions.sourceQuality
+  });
+  effectiveOptions = {
+    ...effectiveOptions,
+    agentModels: adaptiveReasoning.applied
+      ? normalizeAgentModels(adaptiveReasoning.agentModels)
+      : effectiveOptions.agentModels,
+    adaptiveReasoning
+  };
+  if (adaptiveReasoning.applied) {
+    log(`토큰 자동튜닝 적용: ${adaptiveReasoning.reasons.join(" / ")}`, "info", "main");
+  }
   const refineWriterContract = async (promptFileName = "writer-contract-prompt.txt") => {
     const draftWriterContract = buildWriterContract(researchResult, {
       topic: finalTitle || effectiveOptions.topic,
@@ -2480,7 +2670,44 @@ async function runCodexGeneration(options, log = () => {}) {
     return { ok: true, result: contractResult };
   };
 
-  const initialContractRefinement = await refineWriterContract();
+  const contractRefinementPolicy = shouldRefineWriterContract({
+    topic: effectiveOptions.topic,
+    finalTitle,
+    topicMode: effectiveOptions.topicMode,
+    tokenMode: effectiveOptions.tokenMode,
+    researchResult,
+    sourceQuality: effectiveOptions.sourceQuality
+  });
+  let initialContractRefinement = { ok: true, skipped: true, policy: contractRefinementPolicy };
+  if (contractRefinementPolicy.refine) {
+    log(
+      `Main Agent Writer Contract 정밀 검수 유지: ${contractRefinementPolicy.reasons.join(", ")}`,
+      "info",
+      "main"
+    );
+    initialContractRefinement = await refineWriterContract();
+  } else {
+    const draftWriterContract = buildWriterContract(researchResult, {
+      topic: finalTitle || effectiveOptions.topic,
+      finalTitle,
+      preferredTone: effectiveOptions.preferredTone || ""
+    });
+    researchResult = {
+      ...researchResult,
+      writerContract: draftWriterContract,
+      writerContractRefined: false,
+      writerContractPolicy: contractRefinementPolicy,
+      notes: compactTextList([
+        researchResult.notes,
+        "토큰 최적화: 안정적인 일반 글이라 별도 Main Agent Writer Contract 호출을 생략했습니다."
+      ])
+    };
+    log(
+      "토큰 최적화: 안정적인 일반 글이라 Main Agent Writer Contract 호출을 생략합니다.",
+      "info",
+      "main"
+    );
+  }
   if (!initialContractRefinement.ok) {
     return {
       status: "failed",
@@ -2498,7 +2725,7 @@ async function runCodexGeneration(options, log = () => {}) {
     };
   }
 
-  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 1;
+  const maxReviewAttempts = String(effectiveOptions.topicMode || "").toLowerCase() === "auto" ? 3 : 2;
   let writerResult = null;
   let mainReviewResult = null;
   let mainReviewStatus = "";
@@ -2755,6 +2982,111 @@ async function runCodexGeneration(options, log = () => {}) {
         titleImagePath: "",
         notes: compactTextList([writerIssueReason, writerResult?.notes]),
         researchTitleResult: researchResult,
+        tokenUsage: tokenUsageSnapshot()
+      };
+    }
+
+    let deterministicQuality = evaluateArticleQuality({
+      topic: effectiveOptions.topic || finalTitle,
+      title: String(writerResult.title || finalTitle || "").trim(),
+      article: String(writerResult.article || ""),
+      historyTitles: effectiveOptions.historyTitles || [],
+      searchResults: effectiveOptions.searchResults || [],
+      sourceQuality: effectiveOptions.sourceQuality || null
+    });
+    writerResult = { ...writerResult, deterministicQuality };
+
+    if (!deterministicQuality.pass) {
+      const repairPlan = planPartialRepair(deterministicQuality);
+      if (repairPlan.eligible) {
+        log(`Writer 부분 수정 시작: ${repairPlan.issueCodes.join(", ")}`, "info", "writer");
+        const repairResultFileName = `writer-partial-repair-${attempt}-result.json`;
+        const repairResult = await runCodexTask({
+          options: {
+            ...effectiveOptions,
+            agentModels: {
+              ...(effectiveOptions.agentModels || {}),
+              writer: partialRepairEffort(effectiveOptions.tokenEfficiencyMode)
+            }
+          },
+          prompt: buildPartialRepairPrompt({
+            writerResult,
+            deterministicQuality,
+            topic: effectiveOptions.topic || finalTitle,
+            keyword: effectiveOptions.keyword || "",
+            searchResults: effectiveOptions.searchResults || [],
+            resultPath: path.join(effectiveOptions.jobDir, repairResultFileName)
+          }),
+          promptFileName: `writer-partial-repair-${attempt}-prompt.txt`,
+          resultFileName: repairResultFileName,
+          log,
+          tokenOffset: totalTokens,
+          grossTokenOffset: totalGrossTokens,
+          agentTokenOffset: agentTokenTotals.writer,
+          agent: "writer"
+        });
+        totalTokens += Number(repairResult.tokenUsage?.total || 0);
+        totalGrossTokens += Number(repairResult.tokenUsage?.grossTotal || repairResult.tokenUsage?.total || 0);
+        agentTokenTotals.writer += Number(repairResult.tokenUsage?.total || 0);
+        agentGrossTokenTotals.writer += Number(repairResult.tokenUsage?.grossTotal || repairResult.tokenUsage?.total || 0);
+        rememberRateLimits(repairResult);
+
+        const repairedWriterResult = mergePartialRepairResult(writerResult, repairResult);
+        if (repairedWriterResult) {
+          const repairedQuality = evaluateArticleQuality({
+            topic: effectiveOptions.topic || finalTitle,
+            title: String(repairedWriterResult.title || finalTitle || "").trim(),
+            article: String(repairedWriterResult.article || ""),
+            historyTitles: effectiveOptions.historyTitles || [],
+            searchResults: effectiveOptions.searchResults || [],
+            sourceQuality: effectiveOptions.sourceQuality || null
+          });
+          if (repairedQuality.pass) {
+            deterministicQuality = repairedQuality;
+            writerResult = {
+              ...repairedWriterResult,
+              deterministicQuality: repairedQuality,
+              partialRepair: {
+                applied: true,
+                issueCodes: repairPlan.issueCodes,
+                tokenUsage: repairResult.tokenUsage || null
+              }
+            };
+            log("Writer 부분 수정으로 무료 품질 게이트를 통과했습니다. 전체 본문 재작성은 생략합니다.", "info", "writer");
+          } else {
+            log(`Writer 부분 수정 후에도 품질 문제가 남아 기존 전체 재작성 경로로 전환합니다: ${repairedQuality.repairFeedback || "unknown"}`, "warn", "writer");
+            deterministicQuality = repairedQuality;
+            writerResult = { ...repairedWriterResult, deterministicQuality: repairedQuality };
+          }
+        } else {
+          log("Writer 부분 수정 결과가 유효하지 않아 기존 전체 재작성 경로로 전환합니다.", "warn", "writer");
+        }
+      }
+    }
+
+    if (!deterministicQuality.pass) {
+      const qualityReason = deterministicQuality.repairFeedback || "Deterministic quality gate failed.";
+      log(`무료 품질 게이트 감지: ${qualityReason}`, deterministicQuality.hardBlock ? "warn" : "info", "main");
+      if (attempt < maxReviewAttempts) {
+        writerRevisionFeedback = compactTextList([
+          `Deterministic quality gate repair scope: ${deterministicQuality.repairScope}`,
+          qualityReason
+        ]).join(" / ").slice(0, 3000);
+        log(`Main Agent 호출 전에 Writer가 문제 부분을 먼저 수정합니다 (${attempt + 1}/${maxReviewAttempts})`, "info", "main");
+        continue;
+      }
+      return {
+        status: "failed",
+        failurePhase: "quality_gate",
+        failureReason: qualityReason,
+        title: "",
+        article: "",
+        tags: [],
+        bodyImages: [],
+        titleImagePath: "",
+        notes: deterministicQuality.issues.map((item) => item.message),
+        researchTitleResult: researchResult,
+        deterministicQuality,
         tokenUsage: tokenUsageSnapshot()
       };
     }
