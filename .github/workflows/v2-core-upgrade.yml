@@ -34,6 +34,7 @@ on:
       - "scripts/check-v2-early-title-gate.js"
       - "scripts/check-v2-source-cache.js"
       - "scripts/check-v2-research-artifact-cache.js"
+      - "scripts/check-v2-publish-safety-behavior.js"
       - "scripts/check-v2-adaptive-contract.js"
       - "scripts/check-v2-job-diagnostics.js"
       - "scripts/check-v2-history-diagnostics.js"
@@ -172,6 +173,9 @@ jobs:
 
       - name: Check V2 Research artifact cache
         run: node scripts/check-v2-research-artifact-cache.js
+
+      - name: Check V2 publish safety behavior
+        run: node scripts/check-v2-publish-safety-behavior.js
 
       - name: Check V2 adaptive Writer Contract
         run: node scripts/check-v2-adaptive-contract.js
