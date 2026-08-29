@@ -1,0 +1,52 @@
+name: V2 Windows Electron Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - upgrade/best-of-v2
+    paths:
+      - "src/main.js"
+      - "src/renderer/**"
+      - "src/lib/settings.js"
+      - "src/lib/jobDiagnostics.js"
+      - "scripts/smoke-electron.js"
+      - "scripts/check-v2-publish-safety-behavior.js"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/windows-electron-smoke.yml"
+
+concurrency:
+  group: v2-windows-electron-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: upgrade/best-of-v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deterministic repository checks
+        run: npm run check
+
+      - name: Run publish safety behavioral checks
+        run: node scripts/check-v2-publish-safety-behavior.js
+
+      - name: Run credential-free Electron smoke
+        env:
+          BLOGAUTO_SKIP_CODEX_USAGE_REFRESH: "1"
+        run: node scripts/smoke-electron.js
