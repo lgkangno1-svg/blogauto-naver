@@ -10,7 +10,10 @@ on:
       - "src/renderer/**"
       - "src/lib/settings.js"
       - "src/lib/jobDiagnostics.js"
+      - "src/lib/publishSafety.js"
+      - "src/lib/naverPublisher.js"
       - "scripts/smoke-electron.js"
+      - "scripts/run-windows-electron-smoke.js"
       - "scripts/check-v2-publish-safety-behavior.js"
       - "package.json"
       - "package-lock.json"
@@ -49,4 +52,4 @@ jobs:
       - name: Run credential-free Electron smoke
         env:
           BLOGAUTO_SKIP_CODEX_USAGE_REFRESH: "1"
-        run: node scripts/smoke-electron.js
+        run: node scripts/run-windows-electron-smoke.js
